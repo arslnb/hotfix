@@ -17,7 +17,7 @@ use axum::{
     extract::{Path as AxumPath, Query, State},
     http::StatusCode,
     response::{IntoResponse, Redirect, Response},
-    routing::{get, post},
+    routing::{get, patch, post},
 };
 use base64::{
     Engine as _,
@@ -512,6 +512,8 @@ struct SentryOrganizationSummary {
 struct HotfixProjectPayload {
     id: Uuid,
     name: String,
+    slug: String,
+    created_at: i64,
     sentry_organization: Option<SentryOrganizationSummary>,
     sentry_projects: Vec<ImportedSentryProjectPayload>,
 }
@@ -564,10 +566,18 @@ struct UpdateRepoMappingInput {
     repo_id: Option<i64>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateHotfixProjectInput {
+    name: String,
+}
+
 #[derive(Debug, FromRow)]
 struct HotfixProjectRow {
     id: Uuid,
     name: String,
+    slug: String,
+    created_at: OffsetDateTime,
     sentry_connection_id: Option<Uuid>,
     sentry_slug: Option<String>,
     sentry_name: Option<String>,
@@ -689,6 +699,10 @@ async fn main() -> Result<(), AppError> {
         .route("/github/repositories", get(list_github_repositories))
         .route("/hotfix-projects", post(create_hotfix_project))
         .route(
+            "/hotfix-projects/{project_id}",
+            patch(update_hotfix_project),
+        )
+        .route(
             "/hotfix-projects/{project_id}/sentry-connection",
             post(assign_sentry_connection),
         )
@@ -803,15 +817,17 @@ async fn create_hotfix_project(
     }
 
     let project_id = Uuid::new_v4();
+    let slug = generate_unique_project_slug(&state.db, name, None).await?;
     sqlx::query(
         r#"
-        insert into hotfix_projects (id, user_id, name)
-        values ($1, $2, $3)
+        insert into hotfix_projects (id, user_id, name, slug)
+        values ($1, $2, $3, $4)
         "#,
     )
     .bind(project_id)
     .bind(user_id)
     .bind(name)
+    .bind(&slug)
     .execute(&state.db)
     .await?;
 
@@ -862,6 +878,39 @@ async fn assign_sentry_connection(
 
     sync_imported_sentry_projects(&mut tx, project_id, connection.id, &sentry_projects).await?;
     tx.commit().await?;
+
+    let payload = build_single_hotfix_project_payload(&state, user_id, project_id).await?;
+    Ok(Json(payload))
+}
+
+async fn update_hotfix_project(
+    State(state): State<AppState>,
+    session: Session,
+    AxumPath(project_id): AxumPath<Uuid>,
+    Json(input): Json<UpdateHotfixProjectInput>,
+) -> Result<Json<HotfixProjectPayload>, AppError> {
+    let user_id = require_user_id(&session).await?;
+    ensure_hotfix_project_owner(&state.db, user_id, project_id).await?;
+
+    let name = input.name.trim();
+    if name.is_empty() {
+        return Err(AppError::BadRequest("Project name cannot be empty.".into()));
+    }
+    let slug = generate_unique_project_slug(&state.db, name, Some(project_id)).await?;
+
+    sqlx::query(
+        r#"
+        update hotfix_projects
+        set name = $1, slug = $2, updated_at = now()
+        where id = $3 and user_id = $4
+        "#,
+    )
+    .bind(name)
+    .bind(&slug)
+    .bind(project_id)
+    .bind(user_id)
+    .execute(&state.db)
+    .await?;
 
     let payload = build_single_hotfix_project_payload(&state, user_id, project_id).await?;
     Ok(Json(payload))
@@ -1664,6 +1713,8 @@ async fn build_dashboard_payload(
         select
             hotfix_projects.id,
             hotfix_projects.name,
+            hotfix_projects.slug,
+            hotfix_projects.created_at,
             hotfix_projects.sentry_connection_id,
             provider_connections.slug as sentry_slug,
             provider_connections.display_name as sentry_name
@@ -1747,6 +1798,8 @@ async fn build_dashboard_payload(
             HotfixProjectPayload {
                 id: project.id,
                 name: project.name,
+                slug: project.slug,
+                created_at: (project.created_at.unix_timestamp_nanos() / 1_000_000) as i64,
                 sentry_organization,
                 sentry_projects,
             }
@@ -2109,9 +2162,76 @@ fn normalize_email(email: &str) -> Option<String> {
     (!normalized.is_empty()).then_some(normalized)
 }
 
+fn slugify_project_name(name: &str) -> String {
+    let mut slug = String::with_capacity(name.len());
+    let mut previous_was_dash = false;
+
+    for character in name.chars() {
+        let normalized = character.to_ascii_lowercase();
+        if normalized.is_ascii_alphanumeric() {
+            slug.push(normalized);
+            previous_was_dash = false;
+        } else if !previous_was_dash && !slug.is_empty() {
+            slug.push('-');
+            previous_was_dash = true;
+        }
+    }
+
+    while slug.ends_with('-') {
+        slug.pop();
+    }
+
+    if slug.is_empty() {
+        return "project".to_string();
+    }
+
+    if matches!(slug.as_str(), "api" | "privacy" | "terms") {
+        slug.push_str("-project");
+    }
+
+    slug
+}
+
+async fn generate_unique_project_slug(
+    db: &PgPool,
+    name: &str,
+    exclude_project_id: Option<Uuid>,
+) -> Result<String, AppError> {
+    let base_slug = slugify_project_name(name);
+    let mut candidate = base_slug.clone();
+    let mut suffix = 2;
+
+    loop {
+        let exists = sqlx::query_scalar::<_, bool>(
+            r#"
+            select exists(
+                select 1
+                from hotfix_projects
+                where slug = $1
+                  and ($2::uuid is null or id <> $2)
+            )
+            "#,
+        )
+        .bind(&candidate)
+        .bind(exclude_project_id)
+        .fetch_one(db)
+        .await?;
+
+        if !exists {
+            return Ok(candidate);
+        }
+
+        candidate = format!("{base_slug}-{suffix}");
+        suffix += 1;
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{GitHubEmail, Provider, normalize_email, pkce_challenge, select_github_email};
+    use super::{
+        GitHubEmail, Provider, normalize_email, pkce_challenge, select_github_email,
+        slugify_project_name,
+    };
 
     #[test]
     fn provider_slug_parser_is_strict() {
@@ -2165,5 +2285,12 @@ mod tests {
             Some("user@example.com")
         );
         assert_eq!(normalize_email("   "), None);
+    }
+
+    #[test]
+    fn project_slugify_normalizes_human_names() {
+        assert_eq!(slugify_project_name("Zeus server"), "zeus-server");
+        assert_eq!(slugify_project_name("  API / Gateway  "), "api-gateway");
+        assert_eq!(slugify_project_name("!!!"), "project");
     }
 }

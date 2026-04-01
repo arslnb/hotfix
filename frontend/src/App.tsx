@@ -1,4 +1,13 @@
-import { For, Show, createEffect, createResource, createSignal, onCleanup, onMount } from "solid-js";
+import {
+  For,
+  Show,
+  createEffect,
+  createMemo,
+  createResource,
+  createSignal,
+  onCleanup,
+  onMount,
+} from "solid-js";
 
 const sentryIcon = new URL("./assets/sentry.svg", import.meta.url).href;
 const githubIcon = new URL("./assets/github.svg", import.meta.url).href;
@@ -25,22 +34,17 @@ type SessionResponse = {
   } | null;
 };
 
-type DashboardPayload = {
-  sentryOrganizations: SentryOrganizationSummary[];
-  projects: HotfixProject[];
-};
-
 type SentryOrganizationSummary = {
   connectionId: string;
   slug: string;
   name: string;
 };
 
-type HotfixProject = {
-  id: string;
-  name: string;
-  sentryOrganization: SentryOrganizationSummary | null;
-  sentryProjects: ImportedSentryProject[];
+type GitHubRepoMapping = {
+  repoId: number;
+  fullName: string;
+  url: string;
+  defaultBranch: string | null;
 };
 
 type ImportedSentryProject = {
@@ -52,19 +56,18 @@ type ImportedSentryProject = {
   repoMapping: GitHubRepoMapping | null;
 };
 
-type GitHubRepoMapping = {
-  repoId: number;
-  fullName: string;
-  url: string;
-  defaultBranch: string | null;
+type HotfixProject = {
+  id: string;
+  name: string;
+  slug: string;
+  createdAt: number | string;
+  sentryOrganization: SentryOrganizationSummary | null;
+  sentryProjects: ImportedSentryProject[];
 };
 
-type GitHubRepository = {
-  id: number;
-  fullName: string;
-  htmlUrl: string;
-  defaultBranch: string | null;
-  private: boolean;
+type DashboardPayload = {
+  sentryOrganizations: SentryOrganizationSummary[];
+  projects: HotfixProject[];
 };
 
 type AppView = "auth" | "terms" | "privacy";
@@ -72,6 +75,9 @@ type BrandGlyph = {
   character: string;
   accent: boolean;
 };
+type AppTab = "projects" | "usage" | "settings";
+type ProjectsSort = "created" | "alphabetical";
+type ProjectsView = "list" | "grid";
 
 const fetchSession = async (): Promise<SessionResponse> => {
   return fetchJson<SessionResponse>("/api/session", {
@@ -81,19 +87,13 @@ const fetchSession = async (): Promise<SessionResponse> => {
   });
 };
 
-const fetchDashboard = async (): Promise<DashboardPayload> =>
-  fetchJson<DashboardPayload>("/api/dashboard", {
+const fetchDashboard = async (): Promise<DashboardPayload> => {
+  return fetchJson<DashboardPayload>("/api/dashboard", {
     headers: {
       Accept: "application/json",
     },
   });
-
-const fetchGitHubRepositories = async (): Promise<GitHubRepository[]> =>
-  fetchJson<GitHubRepository[]>("/api/github/repositories", {
-    headers: {
-      Accept: "application/json",
-    },
-  });
+};
 
 async function fetchJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
   const response = await fetch(input, init);
@@ -167,14 +167,26 @@ function App() {
     }
   };
 
+  const authenticatedUser = () =>
+    view() === "auth" && session()?.authenticated && session()?.user ? session()?.user : null;
+  const showPublicChrome = () => !authenticatedUser();
+
   return (
     <main class="relative min-h-screen overflow-hidden bg-[var(--app-bg)] text-[var(--text-primary)]">
-      <div class="relative flex min-h-screen w-full flex-col p-4">
-        <header class="absolute left-4 top-[0.7rem] z-10">
-          <a href="/" class="brand-wordmark-link" aria-label="Go to home">
-            <BrandWordmark mode={brandAnimationMode(view(), session())} />
-          </a>
-        </header>
+      <div
+        class={
+          showPublicChrome()
+            ? "relative flex min-h-screen w-full flex-col p-4"
+            : "relative flex min-h-screen w-full flex-col"
+        }
+      >
+        <Show when={showPublicChrome()}>
+          <header class="absolute left-4 top-[0.7rem] z-10">
+            <a href="/" class="brand-wordmark-link" aria-label="Go to home">
+              <BrandWordmark mode={brandAnimationMode(view(), session())} />
+            </a>
+          </header>
+        </Show>
 
         <Show
           when={view() === "auth"}
@@ -188,66 +200,70 @@ function App() {
             </section>
           }
         >
-          <section class="mx-auto flex w-full max-w-[420px] flex-1 items-center py-16">
-            <div class="auth-panel-offset w-full">
-              <div class="auth-shell w-full">
-                <Show
-                  when={!session.error}
-                  fallback={
-                    <FeedbackPanel
-                      eyebrow="Connection issue"
-                      title="The session service is unavailable"
-                      message="Start the Rust backend and refresh the page."
-                      actionLabel="Retry"
-                      onAction={() => void refetch()}
-                    />
-                  }
-                >
-                  <Show
-                    when={!session.loading}
-                    fallback={
-                      <div class="space-y-3">
-                        <div class="h-4 w-28 rounded-[4px] bg-[rgba(255,255,255,0.06)]" />
-                        <div class="h-8 w-64 rounded-[4px] bg-[rgba(255,255,255,0.08)]" />
-                        <div class="h-4 w-52 rounded-[4px] bg-[rgba(255,255,255,0.06)]" />
-                        <div class="mt-8 h-10 rounded-[4px] bg-[rgba(255,255,255,0.06)]" />
-                        <div class="h-10 rounded-[4px] bg-[rgba(255,255,255,0.06)]" />
-                      </div>
-                    }
-                  >
+          <Show
+            when={authenticatedUser()}
+            fallback={
+              <section class="mx-auto flex w-full max-w-[420px] flex-1 items-center py-16">
+                <div class="auth-panel-offset w-full">
+                  <div class="auth-shell w-full">
                     <Show
-                      when={session()?.authenticated && session()?.user}
-                      fallback={<LoginPanel notice={notice()} />}
-                    >
-                      {(result) => (
-                        <AuthenticatedPanel
-                          notice={notice()}
-                          user={result()}
-                          loggingOut={loggingOut()}
-                          onLogout={logout}
+                      when={!session.error}
+                      fallback={
+                        <FeedbackPanel
+                          eyebrow="Connection issue"
+                          title="The session service is unavailable"
+                          message="Start the Rust backend and refresh the page."
+                          actionLabel="Retry"
+                          onAction={() => void refetch()}
                         />
-                      )}
+                      }
+                    >
+                      <Show
+                        when={!session.loading}
+                        fallback={
+                          <div class="space-y-3">
+                            <div class="h-4 w-28 rounded-[4px] bg-[rgba(255,255,255,0.06)]" />
+                            <div class="h-8 w-64 rounded-[4px] bg-[rgba(255,255,255,0.08)]" />
+                            <div class="h-4 w-52 rounded-[4px] bg-[rgba(255,255,255,0.06)]" />
+                            <div class="mt-8 h-10 rounded-[4px] bg-[rgba(255,255,255,0.06)]" />
+                            <div class="h-10 rounded-[4px] bg-[rgba(255,255,255,0.06)]" />
+                          </div>
+                        }
+                      >
+                        <LoginPanel notice={notice()} />
+                      </Show>
                     </Show>
-                  </Show>
-                </Show>
-              </div>
-            </div>
-          </section>
+                  </div>
+                </div>
+              </section>
+            }
+          >
+            {(result) => (
+              <AuthenticatedPanel
+                notice={notice()}
+                user={result()}
+                loggingOut={loggingOut()}
+                onLogout={logout}
+              />
+            )}
+          </Show>
         </Show>
 
-        <footer class="mt-auto flex justify-center pb-2 pt-8">
-          <div class="flex items-center gap-3 text-[0.74rem] text-[var(--text-muted)]">
-            <a class="footer-link" href="/terms">
-              Terms of Service
-            </a>
-            <span aria-hidden="true" class="text-white/18">
-              /
-            </span>
-            <a class="footer-link" href="/privacy">
-              Privacy Policy
-            </a>
-          </div>
-        </footer>
+        <Show when={showPublicChrome()}>
+          <footer class="mt-auto flex justify-center pb-2 pt-8">
+            <div class="flex items-center gap-3 text-[0.74rem] text-[var(--text-muted)]">
+              <a class="footer-link" href="/terms">
+                Terms of Service
+              </a>
+              <span aria-hidden="true" class="text-white/18">
+                /
+              </span>
+              <a class="footer-link" href="/privacy">
+                Privacy Policy
+              </a>
+            </div>
+          </footer>
+        </Show>
       </div>
     </main>
   );
@@ -511,368 +527,1163 @@ function AuthenticatedPanel(props: {
   loggingOut: boolean;
   onLogout: () => Promise<void>;
 }) {
-  const [projectName, setProjectName] = createSignal("");
-  const [projectBusyId, setProjectBusyId] = createSignal<string | null>(null);
-  const [mappingBusyId, setMappingBusyId] = createSignal<string | null>(null);
-  const [creatingProject, setCreatingProject] = createSignal(false);
-  const [localNotice, setLocalNotice] = createSignal<string | null>(null);
-  const [dashboard, { refetch: refetchDashboard }] = createResource(fetchDashboard);
-  const [githubRepos, { refetch: refetchGitHubRepos }] = createResource(
-    () => props.user?.providers.github,
-    async (connected) => {
-      if (!connected) {
-        return [] as GitHubRepository[];
+  const [activeTab, setActiveTab] = createSignal<AppTab>("projects");
+  const [accountMenuOpen, setAccountMenuOpen] = createSignal(false);
+  const [showSidebarShortcuts, setShowSidebarShortcuts] = createSignal(false);
+  const [projectsResetToken, setProjectsResetToken] = createSignal(0);
+  const [forceSidebarCollapsed, setForceSidebarCollapsed] = createSignal(false);
+  const tabs: Array<{ id: AppTab; label: string; shortcut: string }> = [
+    { id: "projects", label: "Projects", shortcut: "1" },
+    { id: "usage", label: "Usage", shortcut: "2" },
+    { id: "settings", label: "Settings", shortcut: "3" },
+  ];
+
+  const activateTab = (nextTab: AppTab) => {
+    if (nextTab === "projects" && activeTab() === "projects") {
+      setProjectsResetToken((token) => token + 1);
+      setForceSidebarCollapsed(false);
+      return;
+    }
+
+    if (nextTab !== "projects") {
+      setForceSidebarCollapsed(false);
+    }
+
+    setActiveTab(nextTab);
+  };
+
+  onMount(() => {
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (target instanceof HTMLElement && target.closest("[data-account-menu]")) {
+        return;
       }
 
-      return fetchGitHubRepositories();
-    },
-  );
+      setAccountMenuOpen(false);
+    };
 
-  const combinedNotice = () => localNotice() ?? props.notice;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Control" || event.ctrlKey) {
+        setShowSidebarShortcuts(true);
+      }
+
+      if (!event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) {
+        return;
+      }
+
+      if (isEditableTarget(event.target)) {
+        return;
+      }
+
+      const nextTab = tabs.find((tab) => tab.shortcut === event.key);
+      if (!nextTab) {
+        return;
+      }
+
+      event.preventDefault();
+      setAccountMenuOpen(false);
+      activateTab(nextTab.id);
+    };
+
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (!event.ctrlKey) {
+        setShowSidebarShortcuts(false);
+      }
+    };
+
+    const handleWindowBlur = () => {
+      setShowSidebarShortcuts(false);
+    };
+
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("blur", handleWindowBlur);
+    onCleanup(() => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("blur", handleWindowBlur);
+    });
+  });
+
+  return (
+    <section class="logged-in-shell flex w-full flex-1">
+      <aside class="app-sidebar" classList={{ "is-collapsed": forceSidebarCollapsed() }}>
+        <a href="/" class="app-sidebar-brand" aria-label="Go to dashboard">
+          <BrandWordmark mode="hover" />
+        </a>
+
+        <div class="app-sidebar-gap" aria-hidden="true" />
+
+        <nav class="app-sidebar-nav" aria-label="Primary">
+          <For each={tabs}>
+            {(tab) => (
+              <button
+                class="app-sidebar-item"
+                classList={{
+                  "is-active": activeTab() === tab.id,
+                  "show-shortcut": showSidebarShortcuts(),
+                }}
+                type="button"
+                onClick={() => activateTab(tab.id)}
+                aria-pressed={activeTab() === tab.id}
+                title={`${tab.label} (Ctrl+${tab.shortcut})`}
+              >
+                <SidebarIcon tab={tab.id} />
+                <span class="app-sidebar-label">{tab.label}</span>
+                <span class="app-sidebar-shortcut" aria-hidden="true">
+                  ^{tab.shortcut}
+                </span>
+              </button>
+            )}
+          </For>
+        </nav>
+
+        <div class="app-sidebar-spacer" />
+
+        <div class="app-sidebar-account" data-account-menu>
+          <div class="app-sidebar-account-copy">
+            <p class="app-sidebar-account-name">{props.user?.displayName}</p>
+            <p class="app-sidebar-account-subtitle">{props.user?.email ?? "Signed in"}</p>
+          </div>
+          <div class="app-sidebar-account-actions">
+            <button
+              class="app-sidebar-menu-trigger"
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={accountMenuOpen()}
+              onClick={() => setAccountMenuOpen((open) => !open)}
+              title="Account menu"
+            >
+              <span />
+              <span />
+              <span />
+            </button>
+          </div>
+
+          <Show when={accountMenuOpen()}>
+            <div class="app-sidebar-popover" role="menu">
+              <button
+                class="app-sidebar-popover-item"
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setAccountMenuOpen(false);
+                  void props.onLogout();
+                }}
+                disabled={props.loggingOut}
+              >
+                {props.loggingOut ? "Logging out..." : "Log out"}
+              </button>
+            </div>
+          </Show>
+        </div>
+      </aside>
+
+      <div
+        class="logged-in-main"
+        classList={{ "has-blueprint": activeTab() === "projects" && forceSidebarCollapsed() }}
+      >
+        <div class="logged-in-panel">
+          <Show when={activeTab() === "projects"}>
+            <ProjectsTab
+              resetToken={projectsResetToken()}
+              onProjectOpenChange={setForceSidebarCollapsed}
+            />
+          </Show>
+          <Show when={activeTab() === "usage"}>
+            <UsageTab />
+          </Show>
+          <Show when={activeTab() === "settings"}>
+            <SettingsTab
+              user={props.user}
+              notice={props.notice}
+              loggingOut={props.loggingOut}
+              onLogout={props.onLogout}
+            />
+          </Show>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ProjectsTab(props: { resetToken: number; onProjectOpenChange: (open: boolean) => void }) {
+  const [sortBy, setSortBy] = createSignal<ProjectsSort>("created");
+  const [viewMode, setViewMode] = createSignal<ProjectsView>("list");
+  const [createModalOpen, setCreateModalOpen] = createSignal(false);
+  const [projectName, setProjectName] = createSignal("");
+  const [selectedConnectionId, setSelectedConnectionId] = createSignal("");
+  const [selectedProjectId, setSelectedProjectId] = createSignal<string | null>(null);
+  const [openedProjectId, setOpenedProjectId] = createSignal<string | null>(null);
+  const [routeProjectSlug, setRouteProjectSlug] = createSignal<string | null>(
+    typeof window === "undefined" ? null : getProjectSlugFromPath(window.location.pathname),
+  );
+  const [createError, setCreateError] = createSignal<string | null>(null);
+  const [creating, setCreating] = createSignal(false);
+  const [dashboard, { refetch, mutate }] = createResource(() => "dashboard", async () => fetchDashboard());
+
+  const sentryOrganizations = createMemo(() => dashboard()?.sentryOrganizations ?? []);
+  const canCreateProject = createMemo(
+    () => projectName().trim().length > 0 && selectedConnectionId().length > 0 && !creating(),
+  );
+  const sortedProjects = createMemo(() => {
+    const projects = [...(dashboard()?.projects ?? [])];
+
+    if (sortBy() === "alphabetical") {
+      projects.sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+      return projects;
+    }
+
+    projects.sort(
+      (left, right) =>
+        getProjectCreatedAtTimestamp(right.createdAt) - getProjectCreatedAtTimestamp(left.createdAt),
+    );
+    return projects;
+  });
+  const selectedProject = createMemo(() =>
+    sortedProjects().find((project) => project.id === selectedProjectId()) ?? null,
+  );
+  const openedProject = createMemo(() =>
+    sortedProjects().find((project) => project.id === openedProjectId()) ?? null,
+  );
+  let handledResetToken = props.resetToken;
+
+  const openCreateModal = () => {
+    setProjectName("");
+    setCreateError(null);
+    setSelectedConnectionId("");
+    setCreateModalOpen(true);
+  };
+
+  const syncProjectUrl = (slug: string | null, mode: "push" | "replace" = "push") => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const nextPath = getProjectPath(slug);
+    if (window.location.pathname !== nextPath) {
+      if (mode === "replace") {
+        window.history.replaceState({}, "", nextPath);
+      } else {
+        window.history.pushState({}, "", nextPath);
+      }
+    }
+
+    setRouteProjectSlug(slug);
+  };
+
+  const closeCreateModal = () => {
+    if (creating()) {
+      return;
+    }
+
+    setCreateModalOpen(false);
+    setCreateError(null);
+  };
+
+  const openProject = (projectId: string) => {
+    const project = sortedProjects().find((item) => item.id === projectId);
+    if (!project) {
+      return;
+    }
+
+    setSelectedProjectId(projectId);
+    setOpenedProjectId(projectId);
+    syncProjectUrl(project.slug);
+  };
+
+  const closeProject = (mode: "push" | "replace" = "push") => {
+    setOpenedProjectId(null);
+    syncProjectUrl(null, mode);
+  };
+
+  const moveProjectSelection = (direction: number) => {
+    const projects = sortedProjects();
+    if (!projects.length) {
+      return;
+    }
+
+    const currentIndex = projects.findIndex((project) => project.id === selectedProjectId());
+    const baseIndex = currentIndex >= 0 ? currentIndex : 0;
+    const nextIndex = (baseIndex + direction + projects.length) % projects.length;
+    const nextProject = projects[nextIndex];
+    if (!nextProject) {
+      return;
+    }
+
+    setSelectedProjectId(nextProject.id);
+  };
+
+  createEffect(() => {
+    if (!createModalOpen()) {
+      return;
+    }
+
+    const organizations = sentryOrganizations();
+    if (!organizations.length) {
+      setSelectedConnectionId("");
+      return;
+    }
+
+    if (!organizations.some((organization) => organization.connectionId === selectedConnectionId())) {
+      setSelectedConnectionId("");
+    }
+  });
+
+  createEffect(() => {
+    const projects = sortedProjects();
+
+    if (!projects.length) {
+      setSelectedProjectId(null);
+      setOpenedProjectId(null);
+      if (routeProjectSlug() && !dashboard.loading) {
+        syncProjectUrl(null, "replace");
+      }
+      return;
+    }
+
+    if (!projects.some((project) => project.id === selectedProjectId())) {
+      setSelectedProjectId(projects[0]?.id ?? null);
+    }
+
+    if (openedProjectId() && !projects.some((project) => project.id === openedProjectId())) {
+      setOpenedProjectId(null);
+    }
+  });
+
+  createEffect(() => {
+    const slug = routeProjectSlug();
+    const projects = sortedProjects();
+
+    if (!slug) {
+      if (openedProjectId()) {
+        setOpenedProjectId(null);
+      }
+      return;
+    }
+
+    const project = projects.find((item) => item.slug === slug);
+    if (project) {
+      if (selectedProjectId() !== project.id) {
+        setSelectedProjectId(project.id);
+      }
+      if (openedProjectId() !== project.id) {
+        setOpenedProjectId(project.id);
+      }
+      return;
+    }
+
+    if (!dashboard.loading) {
+      setOpenedProjectId(null);
+      syncProjectUrl(null, "replace");
+    }
+  });
+
+  createEffect(() => {
+    const nextResetToken = props.resetToken;
+    if (nextResetToken === handledResetToken) {
+      return;
+    }
+
+    handledResetToken = nextResetToken;
+    setOpenedProjectId(null);
+    syncProjectUrl(null);
+  });
+
+  createEffect(() => {
+    props.onProjectOpenChange(Boolean(openedProjectId()));
+  });
+
+  onCleanup(() => {
+    props.onProjectOpenChange(false);
+  });
+
+  onMount(() => {
+    const handlePopState = () => {
+      setRouteProjectSlug(getProjectSlugFromPath(window.location.pathname));
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (createModalOpen()) {
+        return;
+      }
+
+      if (isEditableTarget(event.target) || event.metaKey || event.ctrlKey || event.altKey) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      if (key === "n") {
+        event.preventDefault();
+        openCreateModal();
+        return;
+      }
+
+      if (openedProject()) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          closeProject();
+        }
+        return;
+      }
+
+      if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+        event.preventDefault();
+        moveProjectSelection(1);
+        return;
+      }
+
+      if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+        event.preventDefault();
+        moveProjectSelection(-1);
+        return;
+      }
+
+      if (event.key === "Enter" && selectedProject()) {
+        event.preventDefault();
+        openProject(selectedProject()!.id);
+      }
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    window.addEventListener("keydown", handleKeyDown);
+    onCleanup(() => {
+      window.removeEventListener("popstate", handlePopState);
+      window.removeEventListener("keydown", handleKeyDown);
+    });
+  });
+
+  createEffect(() => {
+    if (!createModalOpen()) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeCreateModal();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    onCleanup(() => {
+      window.removeEventListener("keydown", handleKeyDown);
+    });
+  });
 
   const createProject = async (event: SubmitEvent) => {
     event.preventDefault();
-    const name = projectName().trim();
-    if (!name) {
-      setLocalNotice("Project name cannot be empty.");
+    const trimmedName = projectName().trim();
+
+    if (!trimmedName) {
+      setCreateError("Enter a project name.");
       return;
     }
 
-    setCreatingProject(true);
-    setLocalNotice(null);
-
-    try {
-      await fetchJson<HotfixProject>("/api/hotfix-projects", {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ name }),
-      });
-      setProjectName("");
-      await refetchDashboard();
-    } catch (error) {
-      setLocalNotice(error instanceof Error ? error.message : "Could not create the project.");
-    } finally {
-      setCreatingProject(false);
-    }
-  };
-
-  const assignSentryOrganization = async (projectId: string, connectionId: string) => {
-    if (!connectionId) {
+    if (!selectedConnectionId()) {
+      setCreateError("Select a Sentry organization before creating the project.");
       return;
     }
 
-    setProjectBusyId(projectId);
-    setLocalNotice(null);
+    setCreating(true);
+    setCreateError(null);
 
     try {
-      await fetchJson<HotfixProject>(`/api/hotfix-projects/${projectId}/sentry-connection`, {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ connectionId }),
-      });
-      await refetchDashboard();
-    } catch (error) {
-      setLocalNotice(
-        error instanceof Error ? error.message : "Could not connect the Sentry organization.",
-      );
-    } finally {
-      setProjectBusyId(null);
-    }
-  };
-
-  const updateMapping = async (importedProjectId: string, repoId: string) => {
-    setMappingBusyId(importedProjectId);
-    setLocalNotice(null);
-
-    try {
-      await fetchJson<HotfixProject>(`/api/imported-sentry-projects/${importedProjectId}/repo-mapping`, {
+      const project = await fetchJson<HotfixProject>("/api/hotfix-projects", {
         method: "POST",
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          repoId: repoId ? Number(repoId) : null,
+          name: trimmedName,
         }),
       });
-      await refetchDashboard();
-      if (props.user?.providers.github) {
-        await refetchGitHubRepos();
-      }
+
+      await fetchJson<HotfixProject>(`/api/hotfix-projects/${project.id}/sentry-connection`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          connectionId: selectedConnectionId(),
+        }),
+      });
+
+      setCreateModalOpen(false);
+      setProjectName("");
+      setSelectedConnectionId("");
+      setSelectedProjectId(project.id);
+      closeProject("replace");
+      await refetch();
     } catch (error) {
-      setLocalNotice(
-        error instanceof Error ? error.message : "Could not update the repository mapping.",
-      );
+      const message = error instanceof Error ? error.message : "Could not create the project.";
+      setCreateError(message);
+      await refetch();
     } finally {
-      setMappingBusyId(null);
+      setCreating(false);
     }
   };
 
-  const connectProvider = (provider: "github" | "sentry") => {
-    window.location.assign(`/api/auth/${provider}/start`);
+  const renameProject = async (projectId: string, nextName: string) => {
+    const trimmedName = nextName.trim();
+    if (!trimmedName) {
+      throw new Error("Project name cannot be empty.");
+    }
+
+    const previousDashboard = dashboard();
+    mutate((payload) =>
+      payload
+        ? {
+            ...payload,
+            projects: payload.projects.map((project) =>
+              project.id === projectId ? { ...project, name: trimmedName } : project,
+            ),
+          }
+        : payload,
+    );
+
+    try {
+      const updatedProject = await fetchJson<HotfixProject>(`/api/hotfix-projects/${projectId}`, {
+        method: "PATCH",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: trimmedName,
+        }),
+      });
+
+      mutate((payload) =>
+        payload
+          ? {
+              ...payload,
+              projects: payload.projects.map((project) =>
+                project.id === updatedProject.id ? updatedProject : project,
+              ),
+            }
+          : payload,
+      );
+
+      if (openedProjectId() === projectId) {
+        syncProjectUrl(updatedProject.slug, "replace");
+      }
+    } catch (error) {
+      mutate(previousDashboard);
+      throw error;
+    }
   };
 
   return (
-    <div class="space-y-6">
-      <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div class="space-y-2">
-          <p class="text-[0.68rem] font-medium uppercase tracking-[0.28em] text-[var(--text-muted)]">
-            Hotfix projects
-          </p>
-          <div class="space-y-1">
-            <h1 class="text-[1.9rem] font-medium tracking-[-0.05em] text-[var(--text-primary)] sm:text-[2.3rem]">
-              Hello, {props.user?.displayName}
-            </h1>
-            <p class="text-sm text-[var(--text-secondary)]">
-              Connect a Sentry organization, import its projects, and map each one to a GitHub repo.
-            </p>
-          </div>
-        </div>
-
-        <button
-          class="auth-button w-full sm:w-auto sm:min-w-[9rem]"
-          type="button"
-          onClick={() => void props.onLogout()}
-          disabled={props.loggingOut}
-        >
-          <span>{props.loggingOut ? "Logging out..." : "Log out"}</span>
-        </button>
-      </div>
-
-      <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <div class="rounded-[4px] bg-[var(--surface)] px-4 py-4">
-          <div class="flex items-start justify-between gap-4">
-            <div class="space-y-1">
-              <p class="text-sm font-medium text-[var(--text-primary)]">GitHub</p>
-              <p class="text-sm text-[var(--text-secondary)]">
-                {props.user?.providers.github
-                  ? githubRepos.loading
-                    ? "Loading repositories..."
-                    : `${githubRepos()?.length ?? 0} accessible repositories`
-                  : "Connect GitHub to map Sentry projects to repositories."}
-              </p>
-            </div>
-            <button
-              class="secondary-button"
-              type="button"
-              onClick={() => connectProvider("github")}
-            >
-              {props.user?.providers.github ? "Reconnect GitHub" : "Connect GitHub"}
-            </button>
-          </div>
-        </div>
-
-        <div class="rounded-[4px] bg-[var(--surface)] px-4 py-4">
-          <div class="flex items-start justify-between gap-4">
-            <div class="space-y-1">
-              <p class="text-sm font-medium text-[var(--text-primary)]">Sentry organizations</p>
-              <p class="text-sm text-[var(--text-secondary)]">
-                {dashboard.loading
-                  ? "Loading connected organizations..."
-                  : dashboard()?.sentryOrganizations.length
-                    ? `${dashboard()?.sentryOrganizations.length ?? 0} connected`
-                    : "Connect a Sentry organization to import its projects."}
-              </p>
-            </div>
-            <button
-              class="secondary-button"
-              type="button"
-              onClick={() => connectProvider("sentry")}
-            >
-              Connect Sentry
-            </button>
-          </div>
-
-          <Show when={dashboard()?.sentryOrganizations.length}>
-            <div class="mt-3 flex flex-wrap gap-2">
-              <For each={dashboard()?.sentryOrganizations}>
-                {(organization) => (
-                  <span class="rounded-[4px] bg-[rgba(255,255,255,0.05)] px-2.5 py-1.5 text-[0.74rem] text-[var(--text-secondary)]">
-                    {organization.name}
-                    <span class="ml-1 text-[var(--text-muted)]">/{organization.slug}</span>
-                  </span>
-                )}
-              </For>
-            </div>
-          </Show>
-        </div>
-      </div>
-
-      <form class="rounded-[4px] bg-[var(--surface)] px-4 py-4" onSubmit={(event) => void createProject(event)}>
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
-          <label class="flex-1 space-y-2">
-            <span class="text-sm font-medium text-[var(--text-primary)]">Create a Hotfix project</span>
-            <input
-              class="dashboard-input w-full"
-              type="text"
-              value={projectName()}
-              onInput={(event) => setProjectName(event.currentTarget.value)}
-              placeholder="Payments API"
-              maxLength={80}
-            />
-          </label>
-          <button class="secondary-button h-10 min-w-[8.5rem]" type="submit" disabled={creatingProject()}>
-            {creatingProject() ? "Creating..." : "Create project"}
-          </button>
-        </div>
-      </form>
-
+    <div class="projects-shell">
       <Show
         when={!dashboard.error}
         fallback={
-          <FeedbackPanel
-            eyebrow="Dashboard issue"
-            title="The project dashboard is unavailable"
-            message="Reconnect your providers or retry the request."
-            actionLabel="Retry"
-            onAction={() => void refetchDashboard()}
-          />
+          <div class="projects-error-state">
+            <FeedbackPanel
+              eyebrow="Projects"
+              title="Project data is unavailable"
+              message="Hotfix could not load your projects right now."
+              actionLabel="Retry"
+              onAction={() => void refetch()}
+            />
+          </div>
         }
       >
         <Show
           when={!dashboard.loading}
           fallback={
-            <div class="space-y-3">
-              <div class="h-24 rounded-[4px] bg-[rgba(255,255,255,0.05)]" />
-              <div class="h-24 rounded-[4px] bg-[rgba(255,255,255,0.05)]" />
+            <div class="projects-loading-list" aria-hidden="true">
+              <div class="projects-loading-row" />
+              <div class="projects-loading-row" />
+              <div class="projects-loading-row" />
             </div>
           }
         >
-          <Show
-            when={dashboard()?.projects.length}
-            fallback={
-              <div class="rounded-[4px] bg-[var(--surface)] px-4 py-8 text-center text-sm text-[var(--text-secondary)]">
-                Create your first Hotfix project to start importing Sentry projects.
+          <Show when={openedProject()}>
+            {(project) => (
+              <ProjectWorkspace
+                project={project()}
+                onBack={closeProject}
+                onRename={renameProject}
+              />
+            )}
+          </Show>
+          <Show when={!openedProject()}>
+            <div class="projects-header">
+              <div class="projects-header-copy">
+                <h1 class="projects-title">Projects</h1>
               </div>
-            }
-          >
-            <div class="space-y-4">
-              <For each={dashboard()?.projects}>
-                {(project) => (
-                  <section class="rounded-[4px] bg-[var(--surface)] px-4 py-4">
-                    <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                      <div class="space-y-1">
-                        <h2 class="text-lg font-medium tracking-[-0.03em] text-[var(--text-primary)]">
-                          {project.name}
-                        </h2>
-                        <p class="text-sm text-[var(--text-secondary)]">
-                          {project.sentryOrganization
-                            ? `Importing from ${project.sentryOrganization.name} / ${project.sentryOrganization.slug}`
-                            : "Select a connected Sentry organization to import projects."}
-                        </p>
+
+              <button class="brand-button" type="button" onClick={openCreateModal} disabled={dashboard.loading}>
+                <span class="brand-button-plus" aria-hidden="true">
+                  +
+                </span>
+                <span>New project</span>
+                <span class="brand-button-shortcut" aria-hidden="true">
+                  N
+                </span>
+              </button>
+            </div>
+
+            <div class="projects-toolbar">
+              <div class="projects-toolbar-meta">
+                <span class="projects-toolbar-icon" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" fill="none">
+                    <path
+                      d="M3 3.25h3v3H3v-3Zm7 0h3v3h-3v-3ZM3 9.75h3v3H3v-3Zm7 0h3v3h-3v-3Z"
+                      stroke="currentColor"
+                      stroke-width="1.1"
+                    />
+                  </svg>
+                </span>
+                <span>{sortedProjects().length} Projects</span>
+                <span class="projects-toolbar-divider" aria-hidden="true" />
+                <label class="projects-sort-label" for="projects-sort">
+                  Sort by:
+                </label>
+                <div class="projects-select-wrap">
+                  <select
+                    id="projects-sort"
+                    class="projects-select"
+                    value={sortBy()}
+                    onInput={(event) => setSortBy(event.currentTarget.value as ProjectsSort)}
+                  >
+                    <option value="created">Date Created</option>
+                    <option value="alphabetical">Alphabetical</option>
+                  </select>
+                  <span class="projects-select-caret" aria-hidden="true">
+                    <svg viewBox="0 0 16 16" fill="none">
+                      <path d="m4.25 6.25 3.75 3.75 3.75-3.75" stroke="currentColor" stroke-width="1.15" />
+                    </svg>
+                  </span>
+                </div>
+              </div>
+
+              <div class="projects-view-toggle" role="tablist" aria-label="Project layout">
+                <button
+                  class="projects-view-button"
+                  classList={{ "is-active": viewMode() === "grid" }}
+                  type="button"
+                  role="tab"
+                  aria-selected={viewMode() === "grid"}
+                  title="Grid view"
+                  onClick={() => setViewMode("grid")}
+                >
+                  <ViewModeIcon mode="grid" />
+                </button>
+                <button
+                  class="projects-view-button"
+                  classList={{ "is-active": viewMode() === "list" }}
+                  type="button"
+                  role="tab"
+                  aria-selected={viewMode() === "list"}
+                  title="List view"
+                  onClick={() => setViewMode("list")}
+                >
+                  <ViewModeIcon mode="list" />
+                </button>
+              </div>
+            </div>
+
+            <Show
+              when={sortedProjects().length > 0}
+              fallback={
+                <div class="projects-empty-state">
+                  <div class="projects-empty-illustration" aria-hidden="true">
+                    <svg viewBox="0 0 80 80" fill="none">
+                      <rect x="18" y="16" width="44" height="48" rx="4" fill="rgba(255,255,255,0.03)" />
+                      <path
+                        d="M29 27h22M29 35h16"
+                        stroke="rgba(242,238,227,0.34)"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                      />
+                      <path
+                        d="M26 52.5c4.2-5.2 8.9-7.8 14.2-7.8 5.4 0 9.9 2.6 13.8 7.8"
+                        stroke="url(#empty-graph-stroke)"
+                        stroke-width="3"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                      <circle cx="40.5" cy="22" r="12.5" fill="rgba(127,220,255,0.08)" />
+                      <path
+                        d="M35 22.2h4.2l2.8-4.7 3.6 9.1 2.4-4.4H52"
+                        stroke="url(#empty-graph-stroke)"
+                        stroke-width="2.4"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                      <defs>
+                        <linearGradient id="empty-graph-stroke" x1="24" y1="54" x2="55" y2="18" gradientUnits="userSpaceOnUse">
+                          <stop stop-color="rgba(70,136,220,0.78)" />
+                          <stop offset="0.56" stop-color="rgba(127,220,255,0.9)" />
+                          <stop offset="1" stop-color="#a4f0ff" />
+                        </linearGradient>
+                      </defs>
+                    </svg>
+                  </div>
+                  <p class="projects-empty-title">No projects yet</p>
+                  <p class="projects-empty-copy">
+                    Create a project, connect a Sentry organization, and Hotfix will pull in its
+                    Sentry projects.
+                  </p>
+                </div>
+              }
+            >
+              <div class="projects-collection" classList={{ "is-grid": viewMode() === "grid" }}>
+                <For each={sortedProjects()}>
+                  {(project) => (
+                    <button
+                      class="project-card"
+                      classList={{
+                        "is-grid": viewMode() === "grid",
+                        "is-selected": selectedProjectId() === project.id,
+                      }}
+                      type="button"
+                      aria-selected={selectedProjectId() === project.id}
+                      onFocus={() => setSelectedProjectId(project.id)}
+                      onMouseEnter={() => setSelectedProjectId(project.id)}
+                      onClick={() => openProject(project.id)}
+                    >
+                      <div class="project-card-copy">
+                        <h2 class="project-card-title">{project.name}</h2>
+                        <Show when={viewMode() === "grid"}>
+                          <p class="project-card-subtitle">
+                            {project.sentryOrganization?.name ?? "No Sentry organization selected"}
+                          </p>
+                        </Show>
+                        <p class="project-card-meta">{formatProjectDate(project.createdAt)}</p>
                       </div>
 
-                      <label class="space-y-2 lg:w-[18rem]">
-                        <span class="text-[0.72rem] font-medium uppercase tracking-[0.24em] text-[var(--text-muted)]">
-                          Sentry org
-                        </span>
-                        <select
-                          class="dashboard-select w-full"
-                          value={project.sentryOrganization?.connectionId ?? ""}
-                          onChange={(event) =>
-                            void assignSentryOrganization(project.id, event.currentTarget.value)
-                          }
-                          disabled={projectBusyId() === project.id || !dashboard()?.sentryOrganizations.length}
-                        >
-                          <option value="">Select organization</option>
-                          <For each={dashboard()?.sentryOrganizations}>
-                            {(organization) => (
-                              <option value={organization.connectionId}>
-                                {organization.name} / {organization.slug}
-                              </option>
-                            )}
-                          </For>
-                        </select>
-                      </label>
-                    </div>
-
-                    <div class="mt-4 space-y-3">
-                      <Show
-                        when={project.sentryProjects.length}
-                        fallback={
-                          <div class="rounded-[4px] bg-[rgba(255,255,255,0.03)] px-3 py-3 text-sm text-[var(--text-secondary)]">
-                            {project.sentryOrganization
-                              ? "No Sentry projects were imported for this organization yet."
-                              : "No Sentry organization selected."}
-                          </div>
-                        }
-                      >
-                        <For each={project.sentryProjects}>
-                          {(sentryProject) => (
-                            <div class="grid gap-3 rounded-[4px] bg-[rgba(255,255,255,0.03)] px-3 py-3 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,24rem)] lg:items-center">
-                              <div class="space-y-1">
-                                <div class="flex flex-wrap items-center gap-2">
-                                  <p class="text-sm font-medium text-[var(--text-primary)]">
-                                    {sentryProject.name}
-                                  </p>
-                                  <span class="rounded-[4px] bg-[rgba(255,255,255,0.04)] px-2 py-1 text-[0.7rem] text-[var(--text-secondary)]">
-                                    {sentryProject.slug}
-                                  </span>
-                                  <Show when={sentryProject.platform}>
-                                    <span class="rounded-[4px] bg-[rgba(127,220,255,0.08)] px-2 py-1 text-[0.7rem] text-[#8edbff]">
-                                      {sentryProject.platform}
-                                    </span>
-                                  </Show>
-                                </div>
-                                <p class="text-sm text-[var(--text-secondary)]">
-                                  {sentryProject.repoMapping
-                                    ? `Linked to ${sentryProject.repoMapping.fullName}`
-                                    : "No GitHub repository linked"}
-                                </p>
-                              </div>
-
-                              <div class="space-y-2">
-                                <label class="text-[0.72rem] font-medium uppercase tracking-[0.24em] text-[var(--text-muted)]">
-                                  GitHub repo
-                                </label>
-                                <select
-                                  class="dashboard-select w-full"
-                                  value={sentryProject.repoMapping?.repoId?.toString() ?? ""}
-                                  onChange={(event) =>
-                                    void updateMapping(sentryProject.id, event.currentTarget.value)
-                                  }
-                                  disabled={
-                                    mappingBusyId() === sentryProject.id ||
-                                    !props.user?.providers.github ||
-                                    githubRepos.loading
-                                  }
-                                >
-                                  <option value="">
-                                    {props.user?.providers.github
-                                      ? githubRepos.loading
-                                        ? "Loading repositories..."
-                                        : "Select repository"
-                                      : "Connect GitHub first"}
-                                  </option>
-                                  <For each={githubRepos()}>
-                                    {(repo) => (
-                                      <option value={repo.id.toString()}>
-                                        {repo.fullName}
-                                      </option>
-                                    )}
-                                  </For>
-                                </select>
-                              </div>
-                            </div>
-                          )}
-                        </For>
-                      </Show>
-                    </div>
-                  </section>
-                )}
-              </For>
-            </div>
+                      <div class="project-card-stats" classList={{ "is-inline": viewMode() === "list" }}>
+                        <p class="project-card-count">
+                          {formatSentryProjectCount(project.sentryProjects.length)}
+                        </p>
+                        <ProjectSparkline
+                          seed={`${project.id}:${project.name}`}
+                          compact={viewMode() === "list"}
+                        />
+                      </div>
+                    </button>
+                  )}
+                </For>
+              </div>
+            </Show>
           </Show>
         </Show>
       </Show>
 
-      <Show when={combinedNotice()}>
+      <Show when={createModalOpen()}>
+        <div class="project-modal-backdrop" role="presentation" onClick={() => closeCreateModal()}>
+          <div
+            class="project-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-project-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div class="project-modal-header">
+              <div>
+                <h2 id="create-project-title" class="project-modal-title">
+                  Make a new project
+                </h2>
+              </div>
+              <button class="project-modal-close" type="button" onClick={closeCreateModal} aria-label="Close">
+                <span aria-hidden="true">×</span>
+              </button>
+            </div>
+
+            <form class="project-modal-form" onSubmit={(event) => void createProject(event)}>
+              <label class="project-field">
+                <span class="project-field-label">Name</span>
+                <input
+                  class="project-field-input"
+                  type="text"
+                  name="name"
+                  placeholder="Acme platform"
+                  value={projectName()}
+                  onInput={(event) => setProjectName(event.currentTarget.value)}
+                  autocomplete="off"
+                  maxlength={120}
+                />
+              </label>
+
+              <label class="project-field">
+                <span class="project-field-label">Sentry organization</span>
+                <div
+                  class="projects-select-wrap"
+                  classList={{ "is-disabled": sentryOrganizations().length === 0 }}
+                >
+                  <select
+                    class="project-field-input project-field-select"
+                    value={selectedConnectionId()}
+                    onInput={(event) => setSelectedConnectionId(event.currentTarget.value)}
+                    disabled={sentryOrganizations().length === 0}
+                  >
+                    <option value="">Select a Sentry organization</option>
+                    <Show when={sentryOrganizations().length > 0}>
+                      <For each={sentryOrganizations()}>
+                        {(organization) => (
+                          <option value={organization.connectionId}>
+                            {organization.name}
+                          </option>
+                        )}
+                      </For>
+                    </Show>
+                  </select>
+                  <span class="projects-select-caret" aria-hidden="true">
+                    <svg viewBox="0 0 16 16" fill="none">
+                      <path d="m4.25 6.25 3.75 3.75 3.75-3.75" stroke="currentColor" stroke-width="1.15" />
+                    </svg>
+                  </span>
+                </div>
+                <Show when={sentryOrganizations().length > 0}>
+                  <p class="project-field-helper">
+                    Choose the Sentry organization Hotfix should import from.
+                  </p>
+                </Show>
+                <Show when={sentryOrganizations().length === 0}>
+                  <p class="project-field-helper">
+                    <a class="project-inline-link" href="/api/auth/sentry/start">
+                      Connect Sentry
+                    </a>{" "}
+                    to choose which organization to import.
+                  </p>
+                </Show>
+              </label>
+
+              <Show when={createError()}>
+                {(message) => <p class="project-modal-error">{message()}</p>}
+              </Show>
+
+              <div class="project-modal-actions">
+                <button class="project-modal-secondary" type="button" onClick={closeCreateModal}>
+                  Cancel
+                </button>
+                <button
+                  class="brand-button"
+                  type="submit"
+                  disabled={!canCreateProject()}
+                >
+                  {creating() ? "Creating..." : "Create project"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </Show>
+    </div>
+  );
+}
+
+function ProjectWorkspace(props: {
+  project: HotfixProject;
+  onBack: () => void;
+  onRename: (projectId: string, nextName: string) => Promise<void>;
+}) {
+  const [editingName, setEditingName] = createSignal(false);
+  const [draftName, setDraftName] = createSignal(props.project.name);
+  const [renameError, setRenameError] = createSignal<string | null>(null);
+  const [savingName, setSavingName] = createSignal(false);
+
+  createEffect(() => {
+    if (!editingName()) {
+      setDraftName(props.project.name);
+    }
+  });
+
+  const cancelRename = () => {
+    setDraftName(props.project.name);
+    setRenameError(null);
+    setEditingName(false);
+  };
+
+  const submitRename = async () => {
+    if (savingName()) {
+      return;
+    }
+
+    const trimmedName = draftName().trim();
+    if (!trimmedName) {
+      setRenameError("Project name cannot be empty.");
+      return;
+    }
+
+    if (trimmedName === props.project.name) {
+      setRenameError(null);
+      setEditingName(false);
+      return;
+    }
+
+    setSavingName(true);
+    setRenameError(null);
+
+    try {
+      await props.onRename(props.project.id, trimmedName);
+      setEditingName(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not rename the project.";
+      setRenameError(message);
+    } finally {
+      setSavingName(false);
+    }
+  };
+
+  return (
+    <div class="project-workspace">
+      <header class="project-page-header">
+        <div class="project-page-header-side">
+          <button class="project-workspace-back" type="button" onClick={props.onBack}>
+            <span aria-hidden="true">←</span>
+            <span>Projects</span>
+          </button>
+        </div>
+
+        <div class="project-page-header-center">
+          <Show
+            when={!editingName()}
+            fallback={
+              <input
+                class="project-page-title-input"
+                type="text"
+                value={draftName()}
+                onInput={(event) => setDraftName(event.currentTarget.value)}
+                onBlur={() => void submitRename()}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void submitRename();
+                  }
+
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    cancelRename();
+                  }
+                }}
+                maxlength={120}
+                autofocus
+              />
+            }
+          >
+            <button
+              class="project-page-title-button"
+              type="button"
+              onClick={() => {
+                setDraftName(props.project.name);
+                setRenameError(null);
+                setEditingName(true);
+              }}
+            >
+              {props.project.name}
+            </button>
+          </Show>
+        </div>
+
+        <div class="project-page-header-side project-page-header-side--right">
+          <span class="project-page-header-meta">
+            {savingName() ? "Saving..." : formatProjectDate(props.project.createdAt)}
+          </span>
+        </div>
+      </header>
+
+      <Show when={renameError()}>
+        {(message) => <p class="project-workspace-error">{message()}</p>}
+      </Show>
+
+      <div class="project-workspace-hero">
+        <div class="project-workspace-copy">
+          <p class="project-workspace-subtitle">
+            {props.project.sentryOrganization?.name ?? "No Sentry organization selected"}
+          </p>
+          <p class="project-workspace-meta">
+            {formatSentryProjectCount(props.project.sentryProjects.length)} imported · Created{" "}
+            {formatProjectDate(props.project.createdAt)}
+          </p>
+        </div>
+        <ProjectSparkline seed={`${props.project.id}:${props.project.name}`} compact={false} />
+      </div>
+
+      <div class="project-workspace-grid">
+        <div class="logged-in-card">
+          <p class="logged-in-card-label">Project Overview</p>
+          <h3 class="logged-in-card-title">Telemetry ingestion</h3>
+          <p class="logged-in-card-copy">
+            This project workspace will hold imported Sentry issues, traces, and logs for the
+            linked repositories.
+          </p>
+        </div>
+        <div class="logged-in-card">
+          <p class="logged-in-card-label">Next Section</p>
+          <h3 class="logged-in-card-title">Repository matching</h3>
+          <p class="logged-in-card-copy">
+            GitHub repo associations and unresolved Sentry project mappings will live in this area.
+          </p>
+        </div>
+        <div class="logged-in-card">
+          <p class="logged-in-card-label">Keyboard</p>
+          <h3 class="logged-in-card-title">Navigation</h3>
+          <p class="logged-in-card-copy">
+            Press <span class="project-inline-kbd">Esc</span> to return to the project list.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProjectSparkline(props: { seed: string; compact: boolean }) {
+  const width = () => (props.compact ? 128 : 196);
+  const height = () => (props.compact ? 38 : 58);
+  const values = createSparklineSeries(props.seed, props.compact ? 18 : 22);
+  const path = buildSparklinePath(values, width(), height());
+  const gradientId = `sparkline-${props.seed.replace(/[^a-zA-Z0-9_-]/g, "")}`;
+
+  return (
+    <svg
+      class="project-sparkline"
+      viewBox={`0 0 ${width()} ${height()}`}
+      preserveAspectRatio="none"
+      aria-hidden="true"
+    >
+      <defs>
+        <linearGradient id={`${gradientId}-stroke`} x1="0" y1="1" x2="0" y2="0">
+          <stop offset="0%" stop-color="rgba(49, 116, 194, 0.58)" />
+          <stop offset="46%" stop-color="rgba(82, 173, 255, 0.8)" />
+          <stop offset="100%" stop-color="#a4f0ff" />
+        </linearGradient>
+        <linearGradient id={`${gradientId}-fill`} x1="0" y1="1" x2="0" y2="0">
+          <stop offset="0%" stop-color="rgba(32, 94, 176, 0)" />
+          <stop offset="100%" stop-color="rgba(127, 220, 255, 0.18)" />
+        </linearGradient>
+      </defs>
+      <path d={path.area} fill={`url(#${gradientId}-fill)`} />
+      <path
+        d={path.line}
+        fill="none"
+        stroke={`url(#${gradientId}-stroke)`}
+        stroke-width={props.compact ? "1.8" : "2.1"}
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </svg>
+  );
+}
+
+function ViewModeIcon(props: { mode: ProjectsView }) {
+  return (
+    <span class="projects-view-icon" aria-hidden="true">
+      <Show when={props.mode === "grid"}>
+        <svg viewBox="0 0 16 16" fill="none">
+          <path
+            d="M2.75 2.75h4.5v4.5h-4.5v-4.5Zm6 0h4.5v4.5h-4.5v-4.5Zm-6 6h4.5v4.5h-4.5v-4.5Zm6 0h4.5v4.5h-4.5v-4.5Z"
+            stroke="currentColor"
+            stroke-width="1.1"
+          />
+        </svg>
+      </Show>
+      <Show when={props.mode === "list"}>
+        <svg viewBox="0 0 16 16" fill="none">
+          <path d="M4 4h8M4 8h8M4 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01" stroke="currentColor" stroke-width="1.15" />
+        </svg>
+      </Show>
+    </span>
+  );
+}
+
+function UsageTab() {
+  return (
+    <div class="space-y-6">
+      <div class="space-y-2">
+        <p class="text-[0.68rem] font-medium uppercase tracking-[0.28em] text-[var(--text-muted)]">
+          Usage
+        </p>
+        <h1 class="text-[1.62rem] font-medium tracking-[-0.05em] text-[var(--text-primary)] sm:text-[1.82rem]">
+          Usage placeholder
+        </h1>
+        <p class="max-w-2xl text-sm text-[var(--text-secondary)]">
+          This tab will eventually show quota, sync volume, imported telemetry volume, and model
+          consumption.
+        </p>
+      </div>
+
+      <div class="logged-in-metric-grid">
+        <div class="logged-in-metric">
+          <p class="logged-in-metric-label">Projects synced</p>
+          <p class="logged-in-metric-value">12</p>
+          <p class="logged-in-metric-copy">Sample value for the future usage dashboard.</p>
+        </div>
+        <div class="logged-in-metric">
+          <p class="logged-in-metric-label">Events analyzed</p>
+          <p class="logged-in-metric-value">84k</p>
+          <p class="logged-in-metric-copy">Placeholder aggregate for errors, traces, and logs.</p>
+        </div>
+        <div class="logged-in-metric">
+          <p class="logged-in-metric-label">Repo matches</p>
+          <p class="logged-in-metric-value">91%</p>
+          <p class="logged-in-metric-copy">This will become a real mapping-confidence view later.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingsTab(props: {
+  user: SessionResponse["user"];
+  notice: string | null;
+  loggingOut: boolean;
+  onLogout: () => Promise<void>;
+}) {
+  return (
+    <div class="space-y-6">
+      <div class="space-y-2">
+        <p class="text-[0.68rem] font-medium uppercase tracking-[0.28em] text-[var(--text-muted)]">
+          Settings
+        </p>
+        <h1 class="text-[1.62rem] font-medium tracking-[-0.05em] text-[var(--text-primary)] sm:text-[1.82rem]">
+          Account placeholder
+        </h1>
+        <p class="max-w-2xl text-sm text-[var(--text-secondary)]">
+          Provider connection controls and account preferences will live here.
+        </p>
+      </div>
+
+      <div class="logged-in-card-grid">
+        <div class="logged-in-card">
+          <p class="logged-in-card-label">Signed in as</p>
+          <h2 class="logged-in-card-title">{props.user?.displayName}</h2>
+          <p class="logged-in-card-copy">{props.user?.email ?? "No email exposed by the provider."}</p>
+        </div>
+        <div class="logged-in-card">
+          <p class="logged-in-card-label">Connections</p>
+          <h2 class="logged-in-card-title">Provider status</h2>
+          <p class="logged-in-card-copy">
+            Sentry: {props.user?.providers.sentry ? "connected" : "not connected"}
+          </p>
+          <p class="logged-in-card-copy">
+            GitHub: {props.user?.providers.github ? "connected" : "not connected"}
+          </p>
+        </div>
+      </div>
+
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p class="text-sm text-[var(--text-secondary)]">
+          This is placeholder settings content. The logout action remains available here.
+        </p>
+        <button
+          class="secondary-button w-full sm:w-auto sm:min-w-[9rem]"
+          type="button"
+          onClick={() => void props.onLogout()}
+          disabled={props.loggingOut}
+        >
+          {props.loggingOut ? "Logging out..." : "Log out"}
+        </button>
+      </div>
+
+      <Show when={props.notice}>
         {(message) => (
           <p class="rounded-[4px] border border-[rgba(229,99,99,0.18)] bg-[rgba(71,24,24,0.35)] px-4 py-3 text-sm text-[rgba(255,197,197,0.94)]">
             {message()}
@@ -880,6 +1691,32 @@ function AuthenticatedPanel(props: {
         )}
       </Show>
     </div>
+  );
+}
+
+function SidebarIcon(props: { tab: AppTab }) {
+  return (
+    <span class="app-sidebar-icon" aria-hidden="true">
+      <Show when={props.tab === "projects"}>
+        <svg viewBox="0 0 16 16" fill="none">
+          <path d="M2.5 3.5h11v3h-11zM2.5 8.5h11v4h-11z" stroke="currentColor" stroke-width="1.2" />
+        </svg>
+      </Show>
+      <Show when={props.tab === "usage"}>
+        <svg viewBox="0 0 16 16" fill="none">
+          <path d="M3 11.5V8.25M8 11.5V4.5M13 11.5V6.25" stroke="currentColor" stroke-width="1.2" />
+        </svg>
+      </Show>
+      <Show when={props.tab === "settings"}>
+        <svg viewBox="0 0 16 16" fill="none">
+          <path
+            d="M8 4.75a3.25 3.25 0 1 0 0 6.5 3.25 3.25 0 0 0 0-6.5Zm0-2.25 1 .4.95-.55 1.2 1.2-.55.95.4 1 .95.55v1.7l-.95.55-.4 1 .55.95-1.2 1.2-.95-.55-1 .4-.55.95h-1.7l-.55-.95-1-.4-.95.55-1.2-1.2.55-.95-.4-1-.95-.55v-1.7l.95-.55.4-1-.55-.95 1.2-1.2.95.55 1-.4.55-.95h1.7L8 2.5Z"
+            stroke="currentColor"
+            stroke-width="1"
+          />
+        </svg>
+      </Show>
+    </span>
   );
 }
 
@@ -933,6 +1770,116 @@ function LegalSection(props: { title: string; body: string }) {
       <p>{props.body}</p>
     </section>
   );
+}
+
+function isEditableTarget(target: EventTarget | null) {
+  if (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement
+  ) {
+    return true;
+  }
+
+  return target instanceof HTMLElement && target.isContentEditable;
+}
+
+function formatSentryProjectCount(count: number) {
+  return `${count} Sentry project${count === 1 ? "" : "s"}`;
+}
+
+function formatProjectDate(createdAt: number | string) {
+  const date = parseProjectDate(createdAt);
+  if (Number.isNaN(date.getTime())) {
+    return "Unknown date";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
+
+function getProjectSlugFromPath(pathname: string) {
+  if (!pathname || pathname === "/") {
+    return null;
+  }
+
+  const segments = pathname.split("/").filter(Boolean);
+  if (segments.length !== 1) {
+    return null;
+  }
+
+  const [segment] = segments;
+  if (!segment || segment === "api" || segment === "terms" || segment === "privacy") {
+    return null;
+  }
+
+  return decodeURIComponent(segment);
+}
+
+function getProjectPath(slug: string | null) {
+  return slug ? `/${encodeURIComponent(slug)}` : "/";
+}
+
+function getProjectCreatedAtTimestamp(createdAt: number | string) {
+  const date = parseProjectDate(createdAt);
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function parseProjectDate(createdAt: number | string) {
+  if (typeof createdAt === "number") {
+    return new Date(createdAt);
+  }
+
+  const direct = new Date(createdAt);
+  if (!Number.isNaN(direct.getTime())) {
+    return direct;
+  }
+
+  const normalized = createdAt
+    .replace(/^(\d{4}-\d{2}-\d{2}) /, "$1T")
+    .replace(/ ([+-]\d{2}:\d{2}):\d{2}$/, "$1");
+
+  return new Date(normalized);
+}
+
+function createSparklineSeries(seed: string, points: number) {
+  let state = 0;
+
+  for (const character of seed) {
+    state = (state * 33 + character.charCodeAt(0)) >>> 0;
+  }
+
+  return Array.from({ length: points }, (_, index) => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    const wave = Math.sin(index * 0.48 + (state % 11) * 0.14) * 14;
+    const drift = Math.cos(index * 0.24 + (state % 7) * 0.2) * 8;
+    const base = 30 + (state % 38);
+    return Math.max(12, Math.round(base + wave + drift));
+  });
+}
+
+function buildSparklinePath(values: number[], width: number, height: number) {
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = Math.max(max - min, 1);
+  const points = values.map((value, index) => {
+    const x = (index / Math.max(values.length - 1, 1)) * width;
+    const y = height - ((value - min) / range) * (height - 8) - 4;
+    return {
+      x: Number(x.toFixed(2)),
+      y: Number(y.toFixed(2)),
+    };
+  });
+
+  const line = points
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
+    .join(" ");
+  const area = `${line} L ${width} ${height} L 0 ${height} Z`;
+
+  return { line, area };
 }
 
 function scrambleBrandWord(frame: number, totalFrames: number): BrandGlyph[] {
