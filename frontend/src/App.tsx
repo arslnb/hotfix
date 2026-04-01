@@ -25,6 +25,48 @@ type SessionResponse = {
   } | null;
 };
 
+type DashboardPayload = {
+  sentryOrganizations: SentryOrganizationSummary[];
+  projects: HotfixProject[];
+};
+
+type SentryOrganizationSummary = {
+  connectionId: string;
+  slug: string;
+  name: string;
+};
+
+type HotfixProject = {
+  id: string;
+  name: string;
+  sentryOrganization: SentryOrganizationSummary | null;
+  sentryProjects: ImportedSentryProject[];
+};
+
+type ImportedSentryProject = {
+  id: string;
+  sentryProjectId: string;
+  slug: string;
+  name: string;
+  platform: string | null;
+  repoMapping: GitHubRepoMapping | null;
+};
+
+type GitHubRepoMapping = {
+  repoId: number;
+  fullName: string;
+  url: string;
+  defaultBranch: string | null;
+};
+
+type GitHubRepository = {
+  id: number;
+  fullName: string;
+  htmlUrl: string;
+  defaultBranch: string | null;
+  private: boolean;
+};
+
 type AppView = "auth" | "terms" | "privacy";
 type BrandGlyph = {
   character: string;
@@ -32,18 +74,37 @@ type BrandGlyph = {
 };
 
 const fetchSession = async (): Promise<SessionResponse> => {
-  const response = await fetch("/api/session", {
+  return fetchJson<SessionResponse>("/api/session", {
+    headers: {
+      Accept: "application/json",
+    },
+  });
+};
+
+const fetchDashboard = async (): Promise<DashboardPayload> =>
+  fetchJson<DashboardPayload>("/api/dashboard", {
     headers: {
       Accept: "application/json",
     },
   });
 
+const fetchGitHubRepositories = async (): Promise<GitHubRepository[]> =>
+  fetchJson<GitHubRepository[]>("/api/github/repositories", {
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+async function fetchJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
+  const response = await fetch(input, init);
+  const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+
   if (!response.ok) {
-    throw new Error("Could not load the current session.");
+    throw new Error(payload?.error ?? "Request failed.");
   }
 
-  return response.json() as Promise<SessionResponse>;
-};
+  return payload as T;
+}
 
 const getInitialView = (): AppView => {
   if (typeof window === "undefined") {
@@ -450,33 +511,368 @@ function AuthenticatedPanel(props: {
   loggingOut: boolean;
   onLogout: () => Promise<void>;
 }) {
+  const [projectName, setProjectName] = createSignal("");
+  const [projectBusyId, setProjectBusyId] = createSignal<string | null>(null);
+  const [mappingBusyId, setMappingBusyId] = createSignal<string | null>(null);
+  const [creatingProject, setCreatingProject] = createSignal(false);
+  const [localNotice, setLocalNotice] = createSignal<string | null>(null);
+  const [dashboard, { refetch: refetchDashboard }] = createResource(fetchDashboard);
+  const [githubRepos, { refetch: refetchGitHubRepos }] = createResource(
+    () => props.user?.providers.github,
+    async (connected) => {
+      if (!connected) {
+        return [] as GitHubRepository[];
+      }
+
+      return fetchGitHubRepositories();
+    },
+  );
+
+  const combinedNotice = () => localNotice() ?? props.notice;
+
+  const createProject = async (event: SubmitEvent) => {
+    event.preventDefault();
+    const name = projectName().trim();
+    if (!name) {
+      setLocalNotice("Project name cannot be empty.");
+      return;
+    }
+
+    setCreatingProject(true);
+    setLocalNotice(null);
+
+    try {
+      await fetchJson<HotfixProject>("/api/hotfix-projects", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name }),
+      });
+      setProjectName("");
+      await refetchDashboard();
+    } catch (error) {
+      setLocalNotice(error instanceof Error ? error.message : "Could not create the project.");
+    } finally {
+      setCreatingProject(false);
+    }
+  };
+
+  const assignSentryOrganization = async (projectId: string, connectionId: string) => {
+    if (!connectionId) {
+      return;
+    }
+
+    setProjectBusyId(projectId);
+    setLocalNotice(null);
+
+    try {
+      await fetchJson<HotfixProject>(`/api/hotfix-projects/${projectId}/sentry-connection`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ connectionId }),
+      });
+      await refetchDashboard();
+    } catch (error) {
+      setLocalNotice(
+        error instanceof Error ? error.message : "Could not connect the Sentry organization.",
+      );
+    } finally {
+      setProjectBusyId(null);
+    }
+  };
+
+  const updateMapping = async (importedProjectId: string, repoId: string) => {
+    setMappingBusyId(importedProjectId);
+    setLocalNotice(null);
+
+    try {
+      await fetchJson<HotfixProject>(`/api/imported-sentry-projects/${importedProjectId}/repo-mapping`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          repoId: repoId ? Number(repoId) : null,
+        }),
+      });
+      await refetchDashboard();
+      if (props.user?.providers.github) {
+        await refetchGitHubRepos();
+      }
+    } catch (error) {
+      setLocalNotice(
+        error instanceof Error ? error.message : "Could not update the repository mapping.",
+      );
+    } finally {
+      setMappingBusyId(null);
+    }
+  };
+
+  const connectProvider = (provider: "github" | "sentry") => {
+    window.location.assign(`/api/auth/${provider}/start`);
+  };
+
   return (
-    <div class="space-y-7">
-      <div class="space-y-2">
-        <p class="text-[0.68rem] font-medium uppercase tracking-[0.28em] text-[var(--text-muted)]">
-          Session active
-        </p>
-        <h1 class="text-[2rem] font-medium tracking-[-0.04em] text-[var(--text-primary)] sm:text-[2.35rem]">
-          Hello, {props.user?.displayName}
-        </h1>
+    <div class="space-y-6">
+      <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div class="space-y-2">
+          <p class="text-[0.68rem] font-medium uppercase tracking-[0.28em] text-[var(--text-muted)]">
+            Hotfix projects
+          </p>
+          <div class="space-y-1">
+            <h1 class="text-[1.9rem] font-medium tracking-[-0.05em] text-[var(--text-primary)] sm:text-[2.3rem]">
+              Hello, {props.user?.displayName}
+            </h1>
+            <p class="text-sm text-[var(--text-secondary)]">
+              Connect a Sentry organization, import its projects, and map each one to a GitHub repo.
+            </p>
+          </div>
+        </div>
+
+        <button
+          class="auth-button w-full sm:w-auto sm:min-w-[9rem]"
+          type="button"
+          onClick={() => void props.onLogout()}
+          disabled={props.loggingOut}
+        >
+          <span>{props.loggingOut ? "Logging out..." : "Log out"}</span>
+        </button>
       </div>
 
-      <div class="space-y-2 rounded-[4px] border border-[var(--surface-border)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text-secondary)]">
-        <p>sentry: {props.user?.providers.sentry ? "connected" : "not connected"}</p>
-        <p>github: {props.user?.providers.github ? "connected" : "not connected"}</p>
+      <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <div class="rounded-[4px] bg-[var(--surface)] px-4 py-4">
+          <div class="flex items-start justify-between gap-4">
+            <div class="space-y-1">
+              <p class="text-sm font-medium text-[var(--text-primary)]">GitHub</p>
+              <p class="text-sm text-[var(--text-secondary)]">
+                {props.user?.providers.github
+                  ? githubRepos.loading
+                    ? "Loading repositories..."
+                    : `${githubRepos()?.length ?? 0} accessible repositories`
+                  : "Connect GitHub to map Sentry projects to repositories."}
+              </p>
+            </div>
+            <button
+              class="secondary-button"
+              type="button"
+              onClick={() => connectProvider("github")}
+            >
+              {props.user?.providers.github ? "Reconnect GitHub" : "Connect GitHub"}
+            </button>
+          </div>
+        </div>
+
+        <div class="rounded-[4px] bg-[var(--surface)] px-4 py-4">
+          <div class="flex items-start justify-between gap-4">
+            <div class="space-y-1">
+              <p class="text-sm font-medium text-[var(--text-primary)]">Sentry organizations</p>
+              <p class="text-sm text-[var(--text-secondary)]">
+                {dashboard.loading
+                  ? "Loading connected organizations..."
+                  : dashboard()?.sentryOrganizations.length
+                    ? `${dashboard()?.sentryOrganizations.length ?? 0} connected`
+                    : "Connect a Sentry organization to import its projects."}
+              </p>
+            </div>
+            <button
+              class="secondary-button"
+              type="button"
+              onClick={() => connectProvider("sentry")}
+            >
+              Connect Sentry
+            </button>
+          </div>
+
+          <Show when={dashboard()?.sentryOrganizations.length}>
+            <div class="mt-3 flex flex-wrap gap-2">
+              <For each={dashboard()?.sentryOrganizations}>
+                {(organization) => (
+                  <span class="rounded-[4px] bg-[rgba(255,255,255,0.05)] px-2.5 py-1.5 text-[0.74rem] text-[var(--text-secondary)]">
+                    {organization.name}
+                    <span class="ml-1 text-[var(--text-muted)]">/{organization.slug}</span>
+                  </span>
+                )}
+              </For>
+            </div>
+          </Show>
+        </div>
       </div>
 
-      <button
-        class="auth-button w-full"
-        type="button"
-        onClick={() => void props.onLogout()}
-        disabled={props.loggingOut}
+      <form class="rounded-[4px] bg-[var(--surface)] px-4 py-4" onSubmit={(event) => void createProject(event)}>
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <label class="flex-1 space-y-2">
+            <span class="text-sm font-medium text-[var(--text-primary)]">Create a Hotfix project</span>
+            <input
+              class="dashboard-input w-full"
+              type="text"
+              value={projectName()}
+              onInput={(event) => setProjectName(event.currentTarget.value)}
+              placeholder="Payments API"
+              maxLength={80}
+            />
+          </label>
+          <button class="secondary-button h-10 min-w-[8.5rem]" type="submit" disabled={creatingProject()}>
+            {creatingProject() ? "Creating..." : "Create project"}
+          </button>
+        </div>
+      </form>
+
+      <Show
+        when={!dashboard.error}
+        fallback={
+          <FeedbackPanel
+            eyebrow="Dashboard issue"
+            title="The project dashboard is unavailable"
+            message="Reconnect your providers or retry the request."
+            actionLabel="Retry"
+            onAction={() => void refetchDashboard()}
+          />
+        }
       >
-        <span class="provider-glyph">↗</span>
-        <span>{props.loggingOut ? "Logging out..." : "Log out"}</span>
-      </button>
+        <Show
+          when={!dashboard.loading}
+          fallback={
+            <div class="space-y-3">
+              <div class="h-24 rounded-[4px] bg-[rgba(255,255,255,0.05)]" />
+              <div class="h-24 rounded-[4px] bg-[rgba(255,255,255,0.05)]" />
+            </div>
+          }
+        >
+          <Show
+            when={dashboard()?.projects.length}
+            fallback={
+              <div class="rounded-[4px] bg-[var(--surface)] px-4 py-8 text-center text-sm text-[var(--text-secondary)]">
+                Create your first Hotfix project to start importing Sentry projects.
+              </div>
+            }
+          >
+            <div class="space-y-4">
+              <For each={dashboard()?.projects}>
+                {(project) => (
+                  <section class="rounded-[4px] bg-[var(--surface)] px-4 py-4">
+                    <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                      <div class="space-y-1">
+                        <h2 class="text-lg font-medium tracking-[-0.03em] text-[var(--text-primary)]">
+                          {project.name}
+                        </h2>
+                        <p class="text-sm text-[var(--text-secondary)]">
+                          {project.sentryOrganization
+                            ? `Importing from ${project.sentryOrganization.name} / ${project.sentryOrganization.slug}`
+                            : "Select a connected Sentry organization to import projects."}
+                        </p>
+                      </div>
 
-      <Show when={props.notice}>
+                      <label class="space-y-2 lg:w-[18rem]">
+                        <span class="text-[0.72rem] font-medium uppercase tracking-[0.24em] text-[var(--text-muted)]">
+                          Sentry org
+                        </span>
+                        <select
+                          class="dashboard-select w-full"
+                          value={project.sentryOrganization?.connectionId ?? ""}
+                          onChange={(event) =>
+                            void assignSentryOrganization(project.id, event.currentTarget.value)
+                          }
+                          disabled={projectBusyId() === project.id || !dashboard()?.sentryOrganizations.length}
+                        >
+                          <option value="">Select organization</option>
+                          <For each={dashboard()?.sentryOrganizations}>
+                            {(organization) => (
+                              <option value={organization.connectionId}>
+                                {organization.name} / {organization.slug}
+                              </option>
+                            )}
+                          </For>
+                        </select>
+                      </label>
+                    </div>
+
+                    <div class="mt-4 space-y-3">
+                      <Show
+                        when={project.sentryProjects.length}
+                        fallback={
+                          <div class="rounded-[4px] bg-[rgba(255,255,255,0.03)] px-3 py-3 text-sm text-[var(--text-secondary)]">
+                            {project.sentryOrganization
+                              ? "No Sentry projects were imported for this organization yet."
+                              : "No Sentry organization selected."}
+                          </div>
+                        }
+                      >
+                        <For each={project.sentryProjects}>
+                          {(sentryProject) => (
+                            <div class="grid gap-3 rounded-[4px] bg-[rgba(255,255,255,0.03)] px-3 py-3 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,24rem)] lg:items-center">
+                              <div class="space-y-1">
+                                <div class="flex flex-wrap items-center gap-2">
+                                  <p class="text-sm font-medium text-[var(--text-primary)]">
+                                    {sentryProject.name}
+                                  </p>
+                                  <span class="rounded-[4px] bg-[rgba(255,255,255,0.04)] px-2 py-1 text-[0.7rem] text-[var(--text-secondary)]">
+                                    {sentryProject.slug}
+                                  </span>
+                                  <Show when={sentryProject.platform}>
+                                    <span class="rounded-[4px] bg-[rgba(127,220,255,0.08)] px-2 py-1 text-[0.7rem] text-[#8edbff]">
+                                      {sentryProject.platform}
+                                    </span>
+                                  </Show>
+                                </div>
+                                <p class="text-sm text-[var(--text-secondary)]">
+                                  {sentryProject.repoMapping
+                                    ? `Linked to ${sentryProject.repoMapping.fullName}`
+                                    : "No GitHub repository linked"}
+                                </p>
+                              </div>
+
+                              <div class="space-y-2">
+                                <label class="text-[0.72rem] font-medium uppercase tracking-[0.24em] text-[var(--text-muted)]">
+                                  GitHub repo
+                                </label>
+                                <select
+                                  class="dashboard-select w-full"
+                                  value={sentryProject.repoMapping?.repoId?.toString() ?? ""}
+                                  onChange={(event) =>
+                                    void updateMapping(sentryProject.id, event.currentTarget.value)
+                                  }
+                                  disabled={
+                                    mappingBusyId() === sentryProject.id ||
+                                    !props.user?.providers.github ||
+                                    githubRepos.loading
+                                  }
+                                >
+                                  <option value="">
+                                    {props.user?.providers.github
+                                      ? githubRepos.loading
+                                        ? "Loading repositories..."
+                                        : "Select repository"
+                                      : "Connect GitHub first"}
+                                  </option>
+                                  <For each={githubRepos()}>
+                                    {(repo) => (
+                                      <option value={repo.id.toString()}>
+                                        {repo.fullName}
+                                      </option>
+                                    )}
+                                  </For>
+                                </select>
+                              </div>
+                            </div>
+                          )}
+                        </For>
+                      </Show>
+                    </div>
+                  </section>
+                )}
+              </For>
+            </div>
+          </Show>
+        </Show>
+      </Show>
+
+      <Show when={combinedNotice()}>
         {(message) => (
           <p class="rounded-[4px] border border-[rgba(229,99,99,0.18)] bg-[rgba(71,24,24,0.35)] px-4 py-3 text-sm text-[rgba(255,197,197,0.94)]">
             {message()}

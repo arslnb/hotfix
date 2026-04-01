@@ -168,6 +168,7 @@ dependencies = [
 name = "backend"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
  "async-trait",
  "axum",
  "base64",

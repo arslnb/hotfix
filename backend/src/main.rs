@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     env,
     fmt::Display,
     net::SocketAddr,
@@ -6,6 +7,10 @@ use std::{
     sync::Arc,
 };
 
+use aes_gcm::{
+    Aes256Gcm, Nonce,
+    aead::{Aead, KeyInit},
+};
 use async_trait::async_trait;
 use axum::{
     Json, Router,
@@ -247,6 +252,8 @@ enum AppError {
     Config(String),
     #[error("{0}")]
     BadRequest(String),
+    #[error("{0}")]
+    NotFound(String),
     #[error("authentication failed")]
     Auth(String),
     #[error(transparent)]
@@ -262,7 +269,10 @@ enum AppError {
 impl AppError {
     fn client_message(&self) -> &str {
         match self {
-            Self::Config(message) | Self::BadRequest(message) | Self::Auth(message) => message,
+            Self::Config(message)
+            | Self::BadRequest(message)
+            | Self::NotFound(message)
+            | Self::Auth(message) => message,
             Self::Database(_) | Self::Http(_) | Self::Session(_) | Self::Internal => {
                 "Something went wrong. Please try again."
             }
@@ -275,6 +285,7 @@ impl AppError {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
+            Self::NotFound(_) => StatusCode::NOT_FOUND,
             Self::Auth(_) => StatusCode::UNAUTHORIZED,
             Self::Session(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
@@ -352,8 +363,8 @@ impl Provider {
 
     fn scope(self) -> &'static str {
         match self {
-            Self::GitHub => "read:user user:email",
-            Self::Sentry => "org:read",
+            Self::GitHub => "read:user user:email read:org repo",
+            Self::Sentry => "org:read project:read",
         }
     }
 }
@@ -364,15 +375,17 @@ struct OAuthFlow {
     state: String,
     code_verifier: String,
     started_at: i64,
+    link_user_id: Option<Uuid>,
 }
 
 impl OAuthFlow {
-    fn new(provider: Provider) -> Self {
+    fn new(provider: Provider, link_user_id: Option<Uuid>) -> Self {
         Self {
             provider,
             state: random_urlsafe(32),
             code_verifier: random_urlsafe(64),
             started_at: OffsetDateTime::now_utc().unix_timestamp(),
+            link_user_id,
         }
     }
 
@@ -397,6 +410,7 @@ struct ExternalProfile {
     display_name: String,
     email: Option<String>,
     avatar_url: Option<String>,
+    connection: ProviderConnectionSeed,
 }
 
 #[derive(Debug, Serialize)]
@@ -454,14 +468,153 @@ impl From<SessionUserRow> for SessionUser {
     }
 }
 
+#[derive(Debug, Clone)]
+struct ProviderConnectionSeed {
+    external_id: String,
+    slug: Option<String>,
+    display_name: String,
+    scopes: Option<String>,
+    access_token: String,
+}
+
 #[derive(Debug, FromRow)]
 struct IdentityLookup {
     user_id: Uuid,
 }
 
+#[derive(Debug, FromRow)]
+struct ProviderConnectionRow {
+    id: Uuid,
+    provider: String,
+    slug: Option<String>,
+    display_name: String,
+    access_token_nonce: Vec<u8>,
+    access_token_ciphertext: Vec<u8>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DashboardPayload {
+    sentry_organizations: Vec<SentryOrganizationSummary>,
+    projects: Vec<HotfixProjectPayload>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct SentryOrganizationSummary {
+    connection_id: Uuid,
+    slug: String,
+    name: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HotfixProjectPayload {
+    id: Uuid,
+    name: String,
+    sentry_organization: Option<SentryOrganizationSummary>,
+    sentry_projects: Vec<ImportedSentryProjectPayload>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportedSentryProjectPayload {
+    id: Uuid,
+    sentry_project_id: String,
+    slug: String,
+    name: String,
+    platform: Option<String>,
+    repo_mapping: Option<GitHubRepoMappingPayload>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitHubRepoMappingPayload {
+    repo_id: i64,
+    full_name: String,
+    url: String,
+    default_branch: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitHubRepositoryPayload {
+    id: i64,
+    full_name: String,
+    html_url: String,
+    default_branch: Option<String>,
+    private: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateHotfixProjectInput {
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AssignSentryOrganizationInput {
+    connection_id: Uuid,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateRepoMappingInput {
+    repo_id: Option<i64>,
+}
+
+#[derive(Debug, FromRow)]
+struct HotfixProjectRow {
+    id: Uuid,
+    name: String,
+    sentry_connection_id: Option<Uuid>,
+    sentry_slug: Option<String>,
+    sentry_name: Option<String>,
+}
+
+#[derive(Debug, FromRow)]
+struct ImportedSentryProjectRow {
+    id: Uuid,
+    hotfix_project_id: Uuid,
+    sentry_project_id: String,
+    slug: String,
+    name: String,
+    platform: Option<String>,
+    github_repo_id: Option<i64>,
+    github_repo_full_name: Option<String>,
+    github_repo_url: Option<String>,
+    github_repo_default_branch: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SentryOrganization {
+    id: String,
+    slug: String,
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SentryProjectResponse {
+    id: String,
+    slug: String,
+    name: String,
+    platform: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubRepositoryResponse {
+    id: i64,
+    full_name: String,
+    html_url: String,
+    default_branch: Option<String>,
+    private: bool,
+}
+
 #[derive(Debug, Deserialize)]
 struct GitHubTokenResponse {
     access_token: String,
+    scope: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -482,6 +635,7 @@ struct GitHubEmail {
 
 #[derive(Debug, Deserialize)]
 struct SentryTokenResponse {
+    access_token: String,
     user: SentryUser,
 }
 
@@ -531,6 +685,17 @@ async fn main() -> Result<(), AppError> {
     let api = Router::new()
         .route("/health", get(health))
         .route("/session", get(get_session))
+        .route("/dashboard", get(get_dashboard))
+        .route("/github/repositories", get(list_github_repositories))
+        .route("/hotfix-projects", post(create_hotfix_project))
+        .route(
+            "/hotfix-projects/{project_id}/sentry-connection",
+            post(assign_sentry_connection),
+        )
+        .route(
+            "/imported-sentry-projects/{imported_project_id}/repo-mapping",
+            post(update_repo_mapping),
+        )
         .route("/auth/logout", post(logout))
         .route("/auth/{provider}/start", get(start_auth))
         .route("/auth/{provider}/callback", get(auth_callback))
@@ -578,40 +743,16 @@ async fn get_session(
     State(state): State<AppState>,
     session: Session,
 ) -> Result<Json<SessionPayload>, AppError> {
-    let Some(user_id) = session.get::<Uuid>(SESSION_USER_ID_KEY).await? else {
+    let Some(user_id) = current_user_id(&session).await? else {
         return Ok(Json(SessionPayload::anonymous()));
     };
 
-    let user = sqlx::query_as::<_, SessionUserRow>(
-        r#"
-        select
-            users.id,
-            users.display_name,
-            users.email,
-            exists(
-                select 1
-                from auth_identities
-                where auth_identities.user_id = users.id
-                  and auth_identities.provider = 'github'
-            ) as github_connected,
-            exists(
-                select 1
-                from auth_identities
-                where auth_identities.user_id = users.id
-                  and auth_identities.provider = 'sentry'
-            ) as sentry_connected
-        from users
-        where users.id = $1
-        "#,
-    )
-    .bind(user_id)
-    .fetch_optional(&state.db)
-    .await?;
+    let user = query_session_user_optional(&state.db, user_id).await?;
 
     match user {
         Some(user) => Ok(Json(SessionPayload {
             authenticated: true,
-            user: Some(user.into()),
+            user: Some(user),
         })),
         None => {
             session.flush().await?;
@@ -623,6 +764,186 @@ async fn get_session(
 async fn logout(session: Session) -> Result<StatusCode, AppError> {
     session.flush().await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn get_dashboard(
+    State(state): State<AppState>,
+    session: Session,
+) -> Result<Json<DashboardPayload>, AppError> {
+    let user_id = require_user_id(&session).await?;
+    let payload = build_dashboard_payload(&state, user_id).await?;
+    Ok(Json(payload))
+}
+
+async fn list_github_repositories(
+    State(state): State<AppState>,
+    session: Session,
+) -> Result<Json<Vec<GitHubRepositoryPayload>>, AppError> {
+    let user_id = require_user_id(&session).await?;
+    let connection = load_provider_connection(&state.db, user_id, Provider::GitHub).await?;
+    let access_token = decrypt_provider_token(
+        &state.config.session_secret,
+        &connection.access_token_nonce,
+        &connection.access_token_ciphertext,
+    )?;
+    let repos = fetch_all_github_repositories(&state, &access_token).await?;
+    Ok(Json(repos))
+}
+
+async fn create_hotfix_project(
+    State(state): State<AppState>,
+    session: Session,
+    Json(input): Json<CreateHotfixProjectInput>,
+) -> Result<Json<HotfixProjectPayload>, AppError> {
+    let user_id = require_user_id(&session).await?;
+    let name = input.name.trim();
+
+    if name.is_empty() {
+        return Err(AppError::BadRequest("Project name cannot be empty.".into()));
+    }
+
+    let project_id = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        insert into hotfix_projects (id, user_id, name)
+        values ($1, $2, $3)
+        "#,
+    )
+    .bind(project_id)
+    .bind(user_id)
+    .bind(name)
+    .execute(&state.db)
+    .await?;
+
+    let payload = build_single_hotfix_project_payload(&state, user_id, project_id).await?;
+    Ok(Json(payload))
+}
+
+async fn assign_sentry_connection(
+    State(state): State<AppState>,
+    session: Session,
+    AxumPath(project_id): AxumPath<Uuid>,
+    Json(input): Json<AssignSentryOrganizationInput>,
+) -> Result<Json<HotfixProjectPayload>, AppError> {
+    let user_id = require_user_id(&session).await?;
+    ensure_hotfix_project_owner(&state.db, user_id, project_id).await?;
+
+    let mut tx = state.db.begin().await?;
+    let connection =
+        load_provider_connection_with_executor(&mut tx, user_id, input.connection_id).await?;
+    if connection.provider != Provider::Sentry.as_str() {
+        return Err(AppError::BadRequest(
+            "That connection is not a Sentry organization.".into(),
+        ));
+    }
+
+    sqlx::query(
+        r#"
+        update hotfix_projects
+        set sentry_connection_id = $1, updated_at = now()
+        where id = $2 and user_id = $3
+        "#,
+    )
+    .bind(connection.id)
+    .bind(project_id)
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await?;
+
+    let access_token = decrypt_provider_token(
+        &state.config.session_secret,
+        &connection.access_token_nonce,
+        &connection.access_token_ciphertext,
+    )?;
+    let slug = connection.slug.as_deref().ok_or_else(|| {
+        AppError::BadRequest("The Sentry connection is missing an organization slug.".into())
+    })?;
+    let sentry_projects = fetch_all_sentry_projects(&state, &access_token, slug).await?;
+
+    sync_imported_sentry_projects(&mut tx, project_id, connection.id, &sentry_projects).await?;
+    tx.commit().await?;
+
+    let payload = build_single_hotfix_project_payload(&state, user_id, project_id).await?;
+    Ok(Json(payload))
+}
+
+async fn update_repo_mapping(
+    State(state): State<AppState>,
+    session: Session,
+    AxumPath(imported_project_id): AxumPath<Uuid>,
+    Json(input): Json<UpdateRepoMappingInput>,
+) -> Result<Json<HotfixProjectPayload>, AppError> {
+    let user_id = require_user_id(&session).await?;
+    let owner_project_id =
+        load_imported_project_owner(&state.db, user_id, imported_project_id).await?;
+
+    let selected_repo = if let Some(repo_id) = input.repo_id {
+        let connection = load_provider_connection(&state.db, user_id, Provider::GitHub).await?;
+        let access_token = decrypt_provider_token(
+            &state.config.session_secret,
+            &connection.access_token_nonce,
+            &connection.access_token_ciphertext,
+        )?;
+        let repo = fetch_all_github_repositories(&state, &access_token)
+            .await?
+            .into_iter()
+            .find(|repo| repo.id == repo_id)
+            .ok_or_else(|| {
+                AppError::BadRequest(
+                    "That GitHub repository is not accessible through the connected account."
+                        .into(),
+                )
+            })?;
+        Some(repo)
+    } else {
+        None
+    };
+
+    let mut tx = state.db.begin().await?;
+    if let Some(repo) = selected_repo {
+        sqlx::query(
+            r#"
+            insert into sentry_project_repo_mappings (
+                id,
+                imported_sentry_project_id,
+                github_repo_id,
+                github_repo_full_name,
+                github_repo_url,
+                github_repo_default_branch
+            )
+            values ($1, $2, $3, $4, $5, $6)
+            on conflict (imported_sentry_project_id) do update
+            set
+                github_repo_id = excluded.github_repo_id,
+                github_repo_full_name = excluded.github_repo_full_name,
+                github_repo_url = excluded.github_repo_url,
+                github_repo_default_branch = excluded.github_repo_default_branch,
+                updated_at = now()
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(imported_project_id)
+        .bind(repo.id)
+        .bind(repo.full_name)
+        .bind(repo.html_url)
+        .bind(repo.default_branch.as_deref())
+        .execute(&mut *tx)
+        .await?;
+    } else {
+        sqlx::query(
+            r#"
+            delete from sentry_project_repo_mappings
+            where imported_sentry_project_id = $1
+            "#,
+        )
+        .bind(imported_project_id)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+    let payload = build_single_hotfix_project_payload(&state, user_id, owner_project_id).await?;
+    Ok(Json(payload))
 }
 
 async fn start_auth(
@@ -644,7 +965,8 @@ async fn start_auth_inner(
     session: Session,
 ) -> Result<Redirect, AppError> {
     let provider = provider?;
-    let flow = OAuthFlow::new(provider);
+    let link_user_id = session.get::<Uuid>(SESSION_USER_ID_KEY).await?;
+    let flow = OAuthFlow::new(provider, link_user_id);
 
     session.cycle_id().await?;
     session.insert(OAUTH_FLOW_KEY, flow.clone()).await?;
@@ -706,7 +1028,7 @@ async fn auth_callback(
 
         let profile =
             exchange_code_for_profile(&state, provider, code, &flow.code_verifier).await?;
-        let user = upsert_user(&state.db, profile).await?;
+        let user = upsert_user(&state, profile, flow.link_user_id).await?;
 
         session.cycle_id().await?;
         session.insert(SESSION_USER_ID_KEY, user.id).await?;
@@ -814,10 +1136,17 @@ async fn fetch_github_profile(
     Ok(ExternalProfile {
         provider: Provider::GitHub,
         provider_user_id: user.id.to_string(),
-        username: Some(user.login),
+        username: Some(user.login.clone()),
         display_name,
         email,
         avatar_url: user.avatar_url,
+        connection: ProviderConnectionSeed {
+            external_id: user.id.to_string(),
+            slug: Some(user.login.clone()),
+            display_name: user.login,
+            scopes: token.scope,
+            access_token: token.access_token,
+        },
     })
 }
 
@@ -850,6 +1179,7 @@ async fn fetch_sentry_profile(
     }
 
     let token = token_response.json::<SentryTokenResponse>().await?;
+    let organization = fetch_sentry_organization(state, &token.access_token).await?;
     let display_name = token
         .user
         .name
@@ -864,11 +1194,47 @@ async fn fetch_sentry_profile(
         display_name,
         email: token.user.email,
         avatar_url: None,
+        connection: ProviderConnectionSeed {
+            external_id: organization.id.clone(),
+            slug: Some(organization.slug.clone()),
+            display_name: organization.name,
+            scopes: Some(Provider::Sentry.scope().to_string()),
+            access_token: token.access_token,
+        },
     })
 }
 
-async fn upsert_user(db: &PgPool, profile: ExternalProfile) -> Result<SessionUser, AppError> {
-    let mut tx = db.begin().await?;
+async fn fetch_sentry_organization(
+    state: &AppState,
+    access_token: &str,
+) -> Result<SentryOrganization, AppError> {
+    let response = state
+        .http
+        .get("https://sentry.io/api/0/organizations/")
+        .bearer_auth(access_token)
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        let body = response.text().await.unwrap_or_default();
+        warn!(body, "sentry organization lookup failed");
+        return Err(AppError::Auth(
+            "Could not load the authorized Sentry organization.".into(),
+        ));
+    }
+
+    let organizations = response.json::<Vec<SentryOrganization>>().await?;
+    organizations.into_iter().next().ok_or_else(|| {
+        AppError::Auth("The authorized Sentry account did not expose an organization.".into())
+    })
+}
+
+async fn upsert_user(
+    state: &AppState,
+    profile: ExternalProfile,
+    preferred_user_id: Option<Uuid>,
+) -> Result<SessionUser, AppError> {
+    let mut tx = state.db.begin().await?;
     let normalized_email = profile.email.as_deref().and_then(normalize_email);
 
     let existing = sqlx::query_as::<_, IdentityLookup>(
@@ -883,7 +1249,15 @@ async fn upsert_user(db: &PgPool, profile: ExternalProfile) -> Result<SessionUse
     .fetch_optional(&mut *tx)
     .await?;
 
-    let linked_user = if existing.is_none() {
+    if let (Some(existing_identity), Some(link_user_id)) = (&existing, preferred_user_id)
+        && existing_identity.user_id != link_user_id
+    {
+        return Err(AppError::Auth(
+            "That provider account is already linked to another Hotfix user.".into(),
+        ));
+    }
+
+    let linked_user = if existing.is_none() && preferred_user_id.is_none() {
         match normalized_email.as_deref() {
             Some(email) => {
                 sqlx::query_as::<_, IdentityLookup>(
@@ -903,74 +1277,25 @@ async fn upsert_user(db: &PgPool, profile: ExternalProfile) -> Result<SessionUse
         None
     };
 
-    let user_id = if let Some(existing) = existing.or(linked_user) {
-        sqlx::query(
+    let user_id = if let Some(link_user_id) = preferred_user_id {
+        let exists = sqlx::query_scalar::<_, bool>(
             r#"
-            update users
-            set
-                display_name = $1,
-                email = coalesce($2, email),
-                updated_at = now()
-            where id = $3
+            select exists(select 1 from users where id = $1)
             "#,
         )
-        .bind(&profile.display_name)
-        .bind(&normalized_email)
-        .bind(existing.user_id)
-        .execute(&mut *tx)
+        .bind(link_user_id)
+        .fetch_one(&mut *tx)
         .await?;
 
-        let result = sqlx::query(
-            r#"
-            update auth_identities
-            set
-                username = $1,
-                display_name = $2,
-                email = coalesce($3, email),
-                avatar_url = $4,
-                updated_at = now(),
-                last_login_at = now()
-            where provider = $5 and provider_user_id = $6
-            "#,
-        )
-        .bind(&profile.username)
-        .bind(&profile.display_name)
-        .bind(&normalized_email)
-        .bind(&profile.avatar_url)
-        .bind(profile.provider.as_str())
-        .bind(&profile.provider_user_id)
-        .execute(&mut *tx)
-        .await?;
-
-        if result.rows_affected() == 0 {
-            sqlx::query(
-                r#"
-                insert into auth_identities (
-                    id,
-                    user_id,
-                    provider,
-                    provider_user_id,
-                    username,
-                    display_name,
-                    email,
-                    avatar_url
-                )
-                values ($1, $2, $3, $4, $5, $6, $7, $8)
-                "#,
-            )
-            .bind(Uuid::new_v4())
-            .bind(existing.user_id)
-            .bind(profile.provider.as_str())
-            .bind(&profile.provider_user_id)
-            .bind(&profile.username)
-            .bind(&profile.display_name)
-            .bind(&normalized_email)
-            .bind(&profile.avatar_url)
-            .execute(&mut *tx)
-            .await?;
+        if !exists {
+            return Err(AppError::Auth(
+                "The current Hotfix session could not be verified.".into(),
+            ));
         }
 
-        existing.user_id
+        link_user_id
+    } else if let Some(existing_user) = existing.or(linked_user) {
+        existing_user.user_id
     } else {
         let user_id = Uuid::new_v4();
         sqlx::query(
@@ -985,6 +1310,50 @@ async fn upsert_user(db: &PgPool, profile: ExternalProfile) -> Result<SessionUse
         .execute(&mut *tx)
         .await?;
 
+        user_id
+    };
+
+    sqlx::query(
+        r#"
+        update users
+        set
+            display_name = $1,
+            email = coalesce($2, email),
+            updated_at = now()
+        where id = $3
+        "#,
+    )
+    .bind(&profile.display_name)
+    .bind(&normalized_email)
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await?;
+
+    let identity_update = sqlx::query(
+        r#"
+        update auth_identities
+        set
+            user_id = $1,
+            username = $2,
+            display_name = $3,
+            email = coalesce($4, email),
+            avatar_url = $5,
+            updated_at = now(),
+            last_login_at = now()
+        where provider = $6 and provider_user_id = $7
+        "#,
+    )
+    .bind(user_id)
+    .bind(&profile.username)
+    .bind(&profile.display_name)
+    .bind(&normalized_email)
+    .bind(&profile.avatar_url)
+    .bind(profile.provider.as_str())
+    .bind(&profile.provider_user_id)
+    .execute(&mut *tx)
+    .await?;
+
+    if identity_update.rows_affected() == 0 {
         sqlx::query(
             r#"
             insert into auth_identities (
@@ -1010,38 +1379,20 @@ async fn upsert_user(db: &PgPool, profile: ExternalProfile) -> Result<SessionUse
         .bind(&profile.avatar_url)
         .execute(&mut *tx)
         .await?;
+    }
 
-        user_id
-    };
-
-    let user = sqlx::query_as::<_, SessionUserRow>(
-        r#"
-        select
-            users.id,
-            users.display_name,
-            users.email,
-            exists(
-                select 1
-                from auth_identities
-                where auth_identities.user_id = users.id
-                  and auth_identities.provider = 'github'
-            ) as github_connected,
-            exists(
-                select 1
-                from auth_identities
-                where auth_identities.user_id = users.id
-                  and auth_identities.provider = 'sentry'
-            ) as sentry_connected
-        from users
-        where users.id = $1
-        "#,
+    upsert_provider_connection(
+        &mut tx,
+        user_id,
+        profile.provider,
+        &profile.connection,
+        &state.config.session_secret,
     )
-    .bind(user_id)
-    .fetch_one(&mut *tx)
     .await?;
 
+    let user = query_session_user(&mut tx, user_id).await?;
     tx.commit().await?;
-    Ok(user.into())
+    Ok(user)
 }
 
 fn build_authorization_url(config: &AppConfig, flow: &OAuthFlow) -> Result<Url, AppError> {
@@ -1087,6 +1438,616 @@ fn frontend_service(frontend_dist: &Path, index_file: &Path) -> axum::routing::M
     axum::routing::get_service(
         ServeDir::new(frontend_dist).not_found_service(ServeFile::new(index_file)),
     )
+}
+
+async fn current_user_id(session: &Session) -> Result<Option<Uuid>, AppError> {
+    session
+        .get::<Uuid>(SESSION_USER_ID_KEY)
+        .await
+        .map_err(AppError::from)
+}
+
+async fn require_user_id(session: &Session) -> Result<Uuid, AppError> {
+    current_user_id(session)
+        .await?
+        .ok_or_else(|| AppError::Auth("You need to sign in first.".into()))
+}
+
+async fn query_session_user_optional(
+    db: &PgPool,
+    user_id: Uuid,
+) -> Result<Option<SessionUser>, AppError> {
+    let row = sqlx::query_as::<_, SessionUserRow>(
+        r#"
+        select
+            users.id,
+            users.display_name,
+            users.email,
+            exists(
+                select 1
+                from provider_connections
+                where provider_connections.user_id = users.id
+                  and provider_connections.provider = 'github'
+            ) as github_connected,
+            exists(
+                select 1
+                from provider_connections
+                where provider_connections.user_id = users.id
+                  and provider_connections.provider = 'sentry'
+            ) as sentry_connected
+        from users
+        where users.id = $1
+        "#,
+    )
+    .bind(user_id)
+    .fetch_optional(db)
+    .await?;
+
+    Ok(row.map(Into::into))
+}
+
+async fn query_session_user(
+    executor: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: Uuid,
+) -> Result<SessionUser, AppError> {
+    let row = sqlx::query_as::<_, SessionUserRow>(
+        r#"
+        select
+            users.id,
+            users.display_name,
+            users.email,
+            exists(
+                select 1
+                from provider_connections
+                where provider_connections.user_id = users.id
+                  and provider_connections.provider = 'github'
+            ) as github_connected,
+            exists(
+                select 1
+                from provider_connections
+                where provider_connections.user_id = users.id
+                  and provider_connections.provider = 'sentry'
+            ) as sentry_connected
+        from users
+        where users.id = $1
+        "#,
+    )
+    .bind(user_id)
+    .fetch_one(&mut **executor)
+    .await?;
+
+    Ok(row.into())
+}
+
+async fn upsert_provider_connection(
+    executor: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: Uuid,
+    provider: Provider,
+    seed: &ProviderConnectionSeed,
+    secret: &[u8],
+) -> Result<(), AppError> {
+    let (nonce, ciphertext) = encrypt_provider_token(secret, &seed.access_token)?;
+
+    sqlx::query(
+        r#"
+        insert into provider_connections (
+            id,
+            user_id,
+            provider,
+            external_id,
+            slug,
+            display_name,
+            scopes,
+            access_token_nonce,
+            access_token_ciphertext
+        )
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        on conflict (user_id, provider, external_id) do update
+        set
+            slug = excluded.slug,
+            display_name = excluded.display_name,
+            scopes = excluded.scopes,
+            access_token_nonce = excluded.access_token_nonce,
+            access_token_ciphertext = excluded.access_token_ciphertext,
+            updated_at = now()
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(user_id)
+    .bind(provider.as_str())
+    .bind(&seed.external_id)
+    .bind(&seed.slug)
+    .bind(&seed.display_name)
+    .bind(&seed.scopes)
+    .bind(nonce)
+    .bind(ciphertext)
+    .execute(&mut **executor)
+    .await?;
+
+    Ok(())
+}
+
+async fn load_provider_connection(
+    db: &PgPool,
+    user_id: Uuid,
+    provider: Provider,
+) -> Result<ProviderConnectionRow, AppError> {
+    sqlx::query_as::<_, ProviderConnectionRow>(
+        r#"
+        select
+            id,
+            user_id,
+            provider,
+            external_id,
+            slug,
+            display_name,
+            scopes,
+            access_token_nonce,
+            access_token_ciphertext
+        from provider_connections
+        where user_id = $1 and provider = $2
+        order by updated_at desc
+        limit 1
+        "#,
+    )
+    .bind(user_id)
+    .bind(provider.as_str())
+    .fetch_optional(db)
+    .await?
+    .ok_or_else(|| AppError::BadRequest(format!("{} is not connected.", provider.as_str())))
+}
+
+async fn load_provider_connection_with_executor(
+    executor: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: Uuid,
+    connection_id: Uuid,
+) -> Result<ProviderConnectionRow, AppError> {
+    sqlx::query_as::<_, ProviderConnectionRow>(
+        r#"
+        select
+            id,
+            user_id,
+            provider,
+            external_id,
+            slug,
+            display_name,
+            scopes,
+            access_token_nonce,
+            access_token_ciphertext
+        from provider_connections
+        where id = $1 and user_id = $2
+        "#,
+    )
+    .bind(connection_id)
+    .bind(user_id)
+    .fetch_optional(&mut **executor)
+    .await?
+    .ok_or_else(|| AppError::NotFound("The requested provider connection was not found.".into()))
+}
+
+async fn build_dashboard_payload(
+    state: &AppState,
+    user_id: Uuid,
+) -> Result<DashboardPayload, AppError> {
+    let sentry_organizations = sqlx::query_as::<_, ProviderConnectionRow>(
+        r#"
+        select
+            id,
+            user_id,
+            provider,
+            external_id,
+            slug,
+            display_name,
+            scopes,
+            access_token_nonce,
+            access_token_ciphertext
+        from provider_connections
+        where user_id = $1 and provider = 'sentry'
+        order by display_name asc
+        "#,
+    )
+    .bind(user_id)
+    .fetch_all(&state.db)
+    .await?
+    .into_iter()
+    .filter_map(|connection| {
+        connection.slug.map(|slug| SentryOrganizationSummary {
+            connection_id: connection.id,
+            slug,
+            name: connection.display_name,
+        })
+    })
+    .collect::<Vec<_>>();
+
+    let project_rows = sqlx::query_as::<_, HotfixProjectRow>(
+        r#"
+        select
+            hotfix_projects.id,
+            hotfix_projects.name,
+            hotfix_projects.sentry_connection_id,
+            provider_connections.slug as sentry_slug,
+            provider_connections.display_name as sentry_name
+        from hotfix_projects
+        left join provider_connections
+            on provider_connections.id = hotfix_projects.sentry_connection_id
+        where hotfix_projects.user_id = $1
+        order by hotfix_projects.created_at asc
+        "#,
+    )
+    .bind(user_id)
+    .fetch_all(&state.db)
+    .await?;
+
+    let project_ids = project_rows
+        .iter()
+        .map(|project| project.id)
+        .collect::<Vec<_>>();
+    let imported_rows = if project_ids.is_empty() {
+        Vec::new()
+    } else {
+        sqlx::query_as::<_, ImportedSentryProjectRow>(
+            r#"
+            select
+                imported_sentry_projects.id,
+                imported_sentry_projects.hotfix_project_id,
+                imported_sentry_projects.sentry_project_id,
+                imported_sentry_projects.slug,
+                imported_sentry_projects.name,
+                imported_sentry_projects.platform,
+                sentry_project_repo_mappings.github_repo_id,
+                sentry_project_repo_mappings.github_repo_full_name,
+                sentry_project_repo_mappings.github_repo_url,
+                sentry_project_repo_mappings.github_repo_default_branch
+            from imported_sentry_projects
+            left join sentry_project_repo_mappings
+                on sentry_project_repo_mappings.imported_sentry_project_id = imported_sentry_projects.id
+            where imported_sentry_projects.hotfix_project_id = any($1)
+            order by imported_sentry_projects.name asc
+            "#,
+        )
+        .bind(&project_ids)
+        .fetch_all(&state.db)
+        .await?
+    };
+
+    let projects = project_rows
+        .into_iter()
+        .map(|project| {
+            let sentry_organization = match (
+                project.sentry_connection_id,
+                project.sentry_slug,
+                project.sentry_name,
+            ) {
+                (Some(connection_id), Some(slug), Some(name)) => Some(SentryOrganizationSummary {
+                    connection_id,
+                    slug,
+                    name,
+                }),
+                _ => None,
+            };
+
+            let sentry_projects = imported_rows
+                .iter()
+                .filter(|row| row.hotfix_project_id == project.id)
+                .map(|row| ImportedSentryProjectPayload {
+                    id: row.id,
+                    sentry_project_id: row.sentry_project_id.clone(),
+                    slug: row.slug.clone(),
+                    name: row.name.clone(),
+                    platform: row.platform.clone(),
+                    repo_mapping: row.github_repo_id.map(|repo_id| GitHubRepoMappingPayload {
+                        repo_id,
+                        full_name: row.github_repo_full_name.clone().unwrap_or_default(),
+                        url: row.github_repo_url.clone().unwrap_or_default(),
+                        default_branch: row.github_repo_default_branch.clone(),
+                    }),
+                })
+                .collect::<Vec<_>>();
+
+            HotfixProjectPayload {
+                id: project.id,
+                name: project.name,
+                sentry_organization,
+                sentry_projects,
+            }
+        })
+        .collect();
+
+    Ok(DashboardPayload {
+        sentry_organizations,
+        projects,
+    })
+}
+
+async fn build_single_hotfix_project_payload(
+    state: &AppState,
+    user_id: Uuid,
+    project_id: Uuid,
+) -> Result<HotfixProjectPayload, AppError> {
+    let dashboard = build_dashboard_payload(state, user_id).await?;
+    dashboard
+        .projects
+        .into_iter()
+        .find(|project| project.id == project_id)
+        .ok_or_else(|| AppError::NotFound("The requested Hotfix project was not found.".into()))
+}
+
+async fn ensure_hotfix_project_owner(
+    db: &PgPool,
+    user_id: Uuid,
+    project_id: Uuid,
+) -> Result<(), AppError> {
+    let owns_project = sqlx::query_scalar::<_, bool>(
+        r#"
+        select exists(
+            select 1
+            from hotfix_projects
+            where id = $1 and user_id = $2
+        )
+        "#,
+    )
+    .bind(project_id)
+    .bind(user_id)
+    .fetch_one(db)
+    .await?;
+
+    if owns_project {
+        Ok(())
+    } else {
+        Err(AppError::NotFound(
+            "The requested Hotfix project was not found.".into(),
+        ))
+    }
+}
+
+async fn load_imported_project_owner(
+    db: &PgPool,
+    user_id: Uuid,
+    imported_project_id: Uuid,
+) -> Result<Uuid, AppError> {
+    sqlx::query_scalar::<_, Uuid>(
+        r#"
+        select hotfix_projects.id
+        from imported_sentry_projects
+        join hotfix_projects on hotfix_projects.id = imported_sentry_projects.hotfix_project_id
+        where imported_sentry_projects.id = $1 and hotfix_projects.user_id = $2
+        "#,
+    )
+    .bind(imported_project_id)
+    .bind(user_id)
+    .fetch_optional(db)
+    .await?
+    .ok_or_else(|| AppError::NotFound("The requested Sentry project import was not found.".into()))
+}
+
+async fn fetch_all_github_repositories(
+    state: &AppState,
+    access_token: &str,
+) -> Result<Vec<GitHubRepositoryPayload>, AppError> {
+    let mut page = 1;
+    let mut all_repos = Vec::new();
+
+    loop {
+        let mut url =
+            Url::parse("https://api.github.com/user/repos").map_err(|_| AppError::Internal)?;
+        {
+            let mut query = url.query_pairs_mut();
+            query.append_pair("per_page", "100");
+            query.append_pair("page", &page.to_string());
+            query.append_pair("sort", "updated");
+            query.append_pair("affiliation", "owner,collaborator,organization_member");
+        }
+
+        let response = state
+            .http
+            .get(url)
+            .header(ACCEPT, "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .bearer_auth(access_token)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let body = response.text().await.unwrap_or_default();
+            warn!(body, "github repository lookup failed");
+            return Err(AppError::BadRequest(
+                "GitHub repository access is unavailable. Reconnect GitHub.".into(),
+            ));
+        }
+
+        let page_repos = response.json::<Vec<GitHubRepositoryResponse>>().await?;
+        if page_repos.is_empty() {
+            break;
+        }
+
+        all_repos.extend(page_repos.into_iter().map(|repo| GitHubRepositoryPayload {
+            id: repo.id,
+            full_name: repo.full_name,
+            html_url: repo.html_url,
+            default_branch: repo.default_branch,
+            private: repo.private,
+        }));
+
+        page += 1;
+    }
+
+    Ok(all_repos)
+}
+
+async fn fetch_all_sentry_projects(
+    state: &AppState,
+    access_token: &str,
+    organization_slug: &str,
+) -> Result<Vec<SentryProjectResponse>, AppError> {
+    let mut cursor: Option<String> = None;
+    let mut projects = Vec::new();
+
+    loop {
+        let mut url = Url::parse(&format!(
+            "https://sentry.io/api/0/organizations/{organization_slug}/projects/"
+        ))
+        .map_err(|_| AppError::Internal)?;
+        {
+            let mut query = url.query_pairs_mut();
+            query.append_pair("per_page", "100");
+            if let Some(next_cursor) = cursor.as_deref() {
+                query.append_pair("cursor", next_cursor);
+            }
+        }
+
+        let response = state.http.get(url).bearer_auth(access_token).send().await?;
+        if !response.status().is_success() {
+            let body = response.text().await.unwrap_or_default();
+            warn!(body, "sentry project import failed");
+            return Err(AppError::BadRequest(
+                "Could not import Sentry projects for the selected organization.".into(),
+            ));
+        }
+
+        let next_cursor = parse_sentry_next_cursor(
+            response
+                .headers()
+                .get("link")
+                .and_then(|value| value.to_str().ok()),
+        );
+        let page_projects = response.json::<Vec<SentryProjectResponse>>().await?;
+        projects.extend(page_projects);
+
+        match next_cursor {
+            Some(next) => cursor = Some(next),
+            None => break,
+        }
+    }
+
+    Ok(projects)
+}
+
+async fn sync_imported_sentry_projects(
+    executor: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    hotfix_project_id: Uuid,
+    sentry_connection_id: Uuid,
+    projects: &[SentryProjectResponse],
+) -> Result<(), AppError> {
+    let mut seen_project_ids = HashSet::new();
+
+    for project in projects {
+        seen_project_ids.insert(project.id.clone());
+        sqlx::query(
+            r#"
+            insert into imported_sentry_projects (
+                id,
+                hotfix_project_id,
+                sentry_connection_id,
+                sentry_project_id,
+                slug,
+                name,
+                platform
+            )
+            values ($1, $2, $3, $4, $5, $6, $7)
+            on conflict (hotfix_project_id, sentry_project_id) do update
+            set
+                sentry_connection_id = excluded.sentry_connection_id,
+                slug = excluded.slug,
+                name = excluded.name,
+                platform = excluded.platform,
+                updated_at = now()
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(hotfix_project_id)
+        .bind(sentry_connection_id)
+        .bind(&project.id)
+        .bind(&project.slug)
+        .bind(&project.name)
+        .bind(&project.platform)
+        .execute(&mut **executor)
+        .await?;
+    }
+
+    let existing_ids = sqlx::query_scalar::<_, String>(
+        r#"
+        select sentry_project_id
+        from imported_sentry_projects
+        where hotfix_project_id = $1
+        "#,
+    )
+    .bind(hotfix_project_id)
+    .fetch_all(&mut **executor)
+    .await?;
+
+    for sentry_project_id in existing_ids {
+        if !seen_project_ids.contains(&sentry_project_id) {
+            sqlx::query(
+                r#"
+                delete from imported_sentry_projects
+                where hotfix_project_id = $1 and sentry_project_id = $2
+                "#,
+            )
+            .bind(hotfix_project_id)
+            .bind(&sentry_project_id)
+            .execute(&mut **executor)
+            .await?;
+        }
+    }
+
+    Ok(())
+}
+
+fn encrypt_provider_token(secret: &[u8], token: &str) -> Result<(Vec<u8>, Vec<u8>), AppError> {
+    let key = token_cipher_key(secret);
+    let cipher = Aes256Gcm::new_from_slice(&key)
+        .map_err(|_| AppError::Config("Could not initialize token encryption.".into()))?;
+    let nonce_bytes = random::<[u8; 12]>();
+    let nonce = Nonce::from_slice(&nonce_bytes);
+    let ciphertext = cipher
+        .encrypt(nonce, token.as_bytes())
+        .map_err(|_| AppError::Internal)?;
+    Ok((nonce_bytes.to_vec(), ciphertext))
+}
+
+fn decrypt_provider_token(
+    secret: &[u8],
+    nonce: &[u8],
+    ciphertext: &[u8],
+) -> Result<String, AppError> {
+    let key = token_cipher_key(secret);
+    let cipher = Aes256Gcm::new_from_slice(&key)
+        .map_err(|_| AppError::Config("Could not initialize token encryption.".into()))?;
+    let nonce = Nonce::from_slice(nonce);
+    let plaintext = cipher.decrypt(nonce, ciphertext).map_err(|_| {
+        AppError::Auth(
+            "The stored provider connection could not be decrypted. Reconnect it.".into(),
+        )
+    })?;
+    String::from_utf8(plaintext).map_err(|_| AppError::Internal)
+}
+
+fn token_cipher_key(secret: &[u8]) -> [u8; 32] {
+    let digest = Sha256::digest([secret, b":hotfix-provider-connections"].concat());
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&digest[..32]);
+    key
+}
+
+fn parse_sentry_next_cursor(link_header: Option<&str>) -> Option<String> {
+    let header = link_header?;
+    for part in header.split(',') {
+        if !part.contains("rel=\"next\"") || !part.contains("results=\"true\"") {
+            continue;
+        }
+
+        if let Some(cursor) = extract_cursor_value(part) {
+            return Some(cursor);
+        }
+    }
+
+    None
+}
+
+fn extract_cursor_value(part: &str) -> Option<String> {
+    let (_, cursor_part) = part.split_once("cursor=\"")?;
+    let (cursor, _) = cursor_part.split_once('"')?;
+    Some(cursor.to_string())
 }
 
 fn init_tracing() {
