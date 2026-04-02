@@ -53,6 +53,7 @@ type ImportedSentryProject = {
   slug: string;
   name: string;
   platform: string | null;
+  included: boolean;
   repoMapping: GitHubRepoMapping | null;
 };
 
@@ -76,8 +77,14 @@ type BrandGlyph = {
   accent: boolean;
 };
 type AppTab = "projects" | "usage" | "settings";
+type ProjectSectionTab = "logs" | "incidents" | "performance" | "settings";
+type ProjectRouteSection = "home" | ProjectSectionTab;
 type ProjectsSort = "created" | "alphabetical";
 type ProjectsView = "list" | "grid";
+type ProjectRouteState = {
+  slug: string | null;
+  section: ProjectRouteSection;
+};
 
 const fetchSession = async (): Promise<SessionResponse> => {
   return fetchJson<SessionResponse>("/api/session", {
@@ -528,15 +535,27 @@ function AuthenticatedPanel(props: {
   onLogout: () => Promise<void>;
 }) {
   const [activeTab, setActiveTab] = createSignal<AppTab>("projects");
+  const [activeProjectSection, setActiveProjectSection] = createSignal<ProjectRouteSection>(
+    getProjectRoute(window.location.pathname).section,
+  );
   const [accountMenuOpen, setAccountMenuOpen] = createSignal(false);
   const [showSidebarShortcuts, setShowSidebarShortcuts] = createSignal(false);
   const [projectsResetToken, setProjectsResetToken] = createSignal(0);
   const [forceSidebarCollapsed, setForceSidebarCollapsed] = createSignal(false);
-  const tabs: Array<{ id: AppTab; label: string; shortcut: string }> = [
+  const appTabs: Array<{ id: AppTab; label: string; shortcut: string }> = [
     { id: "projects", label: "Projects", shortcut: "1" },
     { id: "usage", label: "Usage", shortcut: "2" },
     { id: "settings", label: "Settings", shortcut: "3" },
   ];
+  const projectTabs: Array<{ id: ProjectRouteSection; label: string; shortcut: string }> = [
+    { id: "home", label: "Home", shortcut: "1" },
+    { id: "logs", label: "Logs", shortcut: "2" },
+    { id: "incidents", label: "Incidents", shortcut: "3" },
+    { id: "performance", label: "Performance", shortcut: "4" },
+    { id: "settings", label: "Settings", shortcut: "5" },
+  ];
+  const sidebarTabs = (): Array<{ id: AppTab | ProjectRouteSection; label: string; shortcut: string }> =>
+    forceSidebarCollapsed() ? projectTabs : appTabs;
 
   const activateTab = (nextTab: AppTab) => {
     if (nextTab === "projects" && activeTab() === "projects") {
@@ -575,7 +594,19 @@ function AuthenticatedPanel(props: {
         return;
       }
 
-      const nextTab = tabs.find((tab) => tab.shortcut === event.key);
+      if (forceSidebarCollapsed()) {
+        const nextProjectTab = projectTabs.find((tab) => tab.shortcut === event.key);
+        if (!nextProjectTab) {
+          return;
+        }
+
+        event.preventDefault();
+        setAccountMenuOpen(false);
+        setActiveProjectSection(nextProjectTab.id);
+        return;
+      }
+
+      const nextTab = appTabs.find((tab) => tab.shortcut === event.key);
       if (!nextTab) {
         return;
       }
@@ -617,23 +648,40 @@ function AuthenticatedPanel(props: {
         <div class="app-sidebar-gap" aria-hidden="true" />
 
         <nav class="app-sidebar-nav" aria-label="Primary">
-          <For each={tabs}>
+          <For each={sidebarTabs()}>
             {(tab) => (
               <button
                 class="app-sidebar-item"
                 classList={{
-                  "is-active": activeTab() === tab.id,
+                  "is-active": forceSidebarCollapsed()
+                    ? activeProjectSection() === tab.id
+                    : activeTab() === tab.id,
                   "show-shortcut": showSidebarShortcuts(),
                 }}
                 type="button"
-                onClick={() => activateTab(tab.id)}
-                aria-pressed={activeTab() === tab.id}
-                title={`${tab.label} (Ctrl+${tab.shortcut})`}
+                onClick={() => {
+                  if (forceSidebarCollapsed()) {
+                    setActiveProjectSection(tab.id as ProjectRouteSection);
+                    return;
+                  }
+
+                  activateTab(tab.id as AppTab);
+                }}
+                aria-pressed={
+                  forceSidebarCollapsed()
+                    ? activeProjectSection() === tab.id
+                    : activeTab() === tab.id
+                }
+                aria-label={forceSidebarCollapsed() ? tab.label : undefined}
               >
                 <SidebarIcon tab={tab.id} />
                 <span class="app-sidebar-label">{tab.label}</span>
                 <span class="app-sidebar-shortcut" aria-hidden="true">
                   ^{tab.shortcut}
+                </span>
+                <span class="app-sidebar-tooltip" aria-hidden="true">
+                  <span class="app-sidebar-tooltip-label">{tab.label}</span>
+                  <span class="app-sidebar-tooltip-shortcut">^{tab.shortcut}</span>
                 </span>
               </button>
             )}
@@ -681,14 +729,13 @@ function AuthenticatedPanel(props: {
         </div>
       </aside>
 
-      <div
-        class="logged-in-main"
-        classList={{ "has-blueprint": activeTab() === "projects" && forceSidebarCollapsed() }}
-      >
+      <div class="logged-in-main">
         <div class="logged-in-panel">
           <Show when={activeTab() === "projects"}>
             <ProjectsTab
+              projectSection={activeProjectSection()}
               resetToken={projectsResetToken()}
+              onProjectSectionChange={setActiveProjectSection}
               onProjectOpenChange={setForceSidebarCollapsed}
             />
           </Show>
@@ -709,7 +756,12 @@ function AuthenticatedPanel(props: {
   );
 }
 
-function ProjectsTab(props: { resetToken: number; onProjectOpenChange: (open: boolean) => void }) {
+function ProjectsTab(props: {
+  projectSection: ProjectRouteSection;
+  resetToken: number;
+  onProjectSectionChange: (section: ProjectRouteSection) => void;
+  onProjectOpenChange: (open: boolean) => void;
+}) {
   const [sortBy, setSortBy] = createSignal<ProjectsSort>("created");
   const [viewMode, setViewMode] = createSignal<ProjectsView>("list");
   const [createModalOpen, setCreateModalOpen] = createSignal(false);
@@ -717,8 +769,9 @@ function ProjectsTab(props: { resetToken: number; onProjectOpenChange: (open: bo
   const [selectedConnectionId, setSelectedConnectionId] = createSignal("");
   const [selectedProjectId, setSelectedProjectId] = createSignal<string | null>(null);
   const [openedProjectId, setOpenedProjectId] = createSignal<string | null>(null);
-  const [routeProjectSlug, setRouteProjectSlug] = createSignal<string | null>(
-    typeof window === "undefined" ? null : getProjectSlugFromPath(window.location.pathname),
+  const [navigatingToProjectList, setNavigatingToProjectList] = createSignal(false);
+  const [routeProject, setRouteProject] = createSignal<ProjectRouteState>(
+    typeof window === "undefined" ? { slug: null, section: "home" } : getProjectRoute(window.location.pathname),
   );
   const [createError, setCreateError] = createSignal<string | null>(null);
   const [creating, setCreating] = createSignal(false);
@@ -757,12 +810,16 @@ function ProjectsTab(props: { resetToken: number; onProjectOpenChange: (open: bo
     setCreateModalOpen(true);
   };
 
-  const syncProjectUrl = (slug: string | null, mode: "push" | "replace" = "push") => {
+  const syncProjectUrl = (
+    slug: string | null,
+    section: ProjectRouteSection,
+    mode: "push" | "replace" = "push",
+  ) => {
     if (typeof window === "undefined") {
       return;
     }
 
-    const nextPath = getProjectPath(slug);
+    const nextPath = getProjectPath(slug, section);
     if (window.location.pathname !== nextPath) {
       if (mode === "replace") {
         window.history.replaceState({}, "", nextPath);
@@ -771,7 +828,7 @@ function ProjectsTab(props: { resetToken: number; onProjectOpenChange: (open: bo
       }
     }
 
-    setRouteProjectSlug(slug);
+    setRouteProject({ slug, section });
   };
 
   const closeCreateModal = () => {
@@ -783,7 +840,7 @@ function ProjectsTab(props: { resetToken: number; onProjectOpenChange: (open: bo
     setCreateError(null);
   };
 
-  const openProject = (projectId: string) => {
+  const openProject = (projectId: string, section: ProjectRouteSection = "home") => {
     const project = sortedProjects().find((item) => item.id === projectId);
     if (!project) {
       return;
@@ -791,13 +848,18 @@ function ProjectsTab(props: { resetToken: number; onProjectOpenChange: (open: bo
 
     setSelectedProjectId(projectId);
     setOpenedProjectId(projectId);
-    syncProjectUrl(project.slug);
+    syncProjectUrl(project.slug, section);
   };
 
   const closeProject = (mode: "push" | "replace" = "push") => {
+    setNavigatingToProjectList(true);
     setOpenedProjectId(null);
-    syncProjectUrl(null, mode);
+    syncProjectUrl(null, "home", mode);
+    queueMicrotask(() => setNavigatingToProjectList(false));
   };
+
+  const goToProjects = () => closeProject("push");
+  const resetToProjects = () => closeProject("replace");
 
   const moveProjectSelection = (direction: number) => {
     const projects = sortedProjects();
@@ -838,8 +900,8 @@ function ProjectsTab(props: { resetToken: number; onProjectOpenChange: (open: bo
     if (!projects.length) {
       setSelectedProjectId(null);
       setOpenedProjectId(null);
-      if (routeProjectSlug() && !dashboard.loading) {
-        syncProjectUrl(null, "replace");
+      if (routeProject().slug && !dashboard.loading) {
+        syncProjectUrl(null, "home", "replace");
       }
       return;
     }
@@ -854,17 +916,22 @@ function ProjectsTab(props: { resetToken: number; onProjectOpenChange: (open: bo
   });
 
   createEffect(() => {
-    const slug = routeProjectSlug();
+    const route = routeProject();
     const projects = sortedProjects();
 
-    if (!slug) {
+    if (!route.slug) {
       if (openedProjectId()) {
         setOpenedProjectId(null);
       }
+      props.onProjectSectionChange("home");
       return;
     }
 
-    const project = projects.find((item) => item.slug === slug);
+    if (navigatingToProjectList()) {
+      return;
+    }
+
+    const project = projects.find((item) => item.slug === route.slug);
     if (project) {
       if (selectedProjectId() !== project.id) {
         setSelectedProjectId(project.id);
@@ -872,12 +939,31 @@ function ProjectsTab(props: { resetToken: number; onProjectOpenChange: (open: bo
       if (openedProjectId() !== project.id) {
         setOpenedProjectId(project.id);
       }
+      props.onProjectSectionChange(route.section);
       return;
     }
 
     if (!dashboard.loading) {
       setOpenedProjectId(null);
-      syncProjectUrl(null, "replace");
+      syncProjectUrl(null, "home", "replace");
+      props.onProjectSectionChange("home");
+    }
+  });
+
+  createEffect(() => {
+    const openProjectId = openedProjectId();
+    if (!openProjectId) {
+      return;
+    }
+
+    const project = openedProject();
+    if (!project) {
+      return;
+    }
+
+    const route = routeProject();
+    if (route.slug !== project.slug || route.section !== props.projectSection) {
+      syncProjectUrl(project.slug, props.projectSection, "push");
     }
   });
 
@@ -888,8 +974,8 @@ function ProjectsTab(props: { resetToken: number; onProjectOpenChange: (open: bo
     }
 
     handledResetToken = nextResetToken;
-    setOpenedProjectId(null);
-    syncProjectUrl(null);
+    resetToProjects();
+    props.onProjectSectionChange("home");
   });
 
   createEffect(() => {
@@ -902,7 +988,7 @@ function ProjectsTab(props: { resetToken: number; onProjectOpenChange: (open: bo
 
   onMount(() => {
     const handlePopState = () => {
-      setRouteProjectSlug(getProjectSlugFromPath(window.location.pathname));
+      setRouteProject(getProjectRoute(window.location.pathname));
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -915,17 +1001,23 @@ function ProjectsTab(props: { resetToken: number; onProjectOpenChange: (open: bo
       }
 
       const key = event.key.toLowerCase();
-      if (key === "n") {
-        event.preventDefault();
-        openCreateModal();
+      if (openedProject()) {
+        if (key === "b") {
+          event.preventDefault();
+          goToProjects();
+          return;
+        }
+
+        if (event.key === "Escape") {
+          event.preventDefault();
+          goToProjects();
+        }
         return;
       }
 
-      if (openedProject()) {
-        if (event.key === "Escape") {
-          event.preventDefault();
-          closeProject();
-        }
+      if (key === "n") {
+        event.preventDefault();
+        openCreateModal();
         return;
       }
 
@@ -1016,7 +1108,7 @@ function ProjectsTab(props: { resetToken: number; onProjectOpenChange: (open: bo
       setProjectName("");
       setSelectedConnectionId("");
       setSelectedProjectId(project.id);
-      closeProject("replace");
+      resetToProjects();
       await refetch();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not create the project.";
@@ -1069,12 +1161,90 @@ function ProjectsTab(props: { resetToken: number; onProjectOpenChange: (open: bo
       );
 
       if (openedProjectId() === projectId) {
-        syncProjectUrl(updatedProject.slug, "replace");
+        syncProjectUrl(updatedProject.slug, props.projectSection, "replace");
       }
     } catch (error) {
       mutate(previousDashboard);
       throw error;
     }
+  };
+
+  const updateSentryProjectSelection = async (projectId: string, includedProjectIds: string[]) => {
+    const previousDashboard = dashboard();
+
+    mutate((payload) =>
+      payload
+        ? {
+            ...payload,
+            projects: payload.projects.map((project) =>
+              project.id === projectId
+                ? {
+                    ...project,
+                    sentryProjects: project.sentryProjects.map((sentryProject) => ({
+                      ...sentryProject,
+                      included: includedProjectIds.includes(sentryProject.id),
+                    })),
+                  }
+                : project,
+            ),
+          }
+        : payload,
+    );
+
+    try {
+      const updatedProject = await fetchJson<HotfixProject>(
+        `/api/hotfix-projects/${projectId}/sentry-project-selection`,
+        {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            includedProjectIds,
+          }),
+        },
+      );
+
+      mutate((payload) =>
+        payload
+          ? {
+              ...payload,
+              projects: payload.projects.map((project) =>
+                project.id === updatedProject.id ? updatedProject : project,
+              ),
+            }
+          : payload,
+      );
+    } catch (error) {
+      mutate(previousDashboard);
+      throw error;
+    }
+  };
+
+  const refreshSentryProjects = async (projectId: string) => {
+    const updatedProject = await fetchJson<HotfixProject>(
+      `/api/hotfix-projects/${projectId}/refresh-sentry-projects`,
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+        },
+      },
+    );
+
+    mutate((payload) =>
+      payload
+        ? {
+            ...payload,
+            projects: payload.projects.map((project) =>
+              project.id === updatedProject.id ? updatedProject : project,
+            ),
+          }
+        : payload,
+    );
+
+    return updatedProject;
   };
 
   return (
@@ -1106,9 +1276,12 @@ function ProjectsTab(props: { resetToken: number; onProjectOpenChange: (open: bo
           <Show when={openedProject()}>
             {(project) => (
               <ProjectWorkspace
+                activeSection={props.projectSection}
                 project={project()}
-                onBack={closeProject}
+                onBack={goToProjects}
+                onRefreshSentryProjects={refreshSentryProjects}
                 onRename={renameProject}
+                onUpdateSentryProjectSelection={updateSentryProjectSelection}
               />
             )}
           </Show>
@@ -1381,12 +1554,16 @@ function ProjectsTab(props: { resetToken: number; onProjectOpenChange: (open: bo
 }
 
 function ProjectWorkspace(props: {
+  activeSection: ProjectRouteSection;
   project: HotfixProject;
   onBack: () => void;
+  onRefreshSentryProjects: (projectId: string) => Promise<HotfixProject>;
   onRename: (projectId: string, nextName: string) => Promise<void>;
+  onUpdateSentryProjectSelection: (projectId: string, includedProjectIds: string[]) => Promise<void>;
 }) {
   const [editingName, setEditingName] = createSignal(false);
   const [draftName, setDraftName] = createSignal(props.project.name);
+  const [refreshingImports, setRefreshingImports] = createSignal(false);
   const [renameError, setRenameError] = createSignal<string | null>(null);
   const [savingName, setSavingName] = createSignal(false);
 
@@ -1435,103 +1612,415 @@ function ProjectWorkspace(props: {
 
   return (
     <div class="project-workspace">
-      <header class="project-page-header">
-        <div class="project-page-header-side">
-          <button class="project-workspace-back" type="button" onClick={props.onBack}>
-            <span aria-hidden="true">←</span>
-            <span>Projects</span>
-          </button>
-        </div>
-
-        <div class="project-page-header-center">
-          <Show
-            when={!editingName()}
-            fallback={
-              <input
-                class="project-page-title-input"
-                type="text"
-                value={draftName()}
-                onInput={(event) => setDraftName(event.currentTarget.value)}
-                onBlur={() => void submitRename()}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    void submitRename();
-                  }
-
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    cancelRename();
-                  }
-                }}
-                maxlength={120}
-                autofocus
-              />
-            }
-          >
-            <button
-              class="project-page-title-button"
-              type="button"
-              onClick={() => {
-                setDraftName(props.project.name);
-                setRenameError(null);
-                setEditingName(true);
-              }}
-            >
-              {props.project.name}
+      <div class="project-page-header-shell" classList={{ "is-loading": refreshingImports() }}>
+        <header class="project-page-header">
+          <div class="project-page-header-side">
+            <button class="project-workspace-back" type="button" onClick={props.onBack}>
+              <span aria-hidden="true">←</span>
+              <span>Projects</span>
+              <span class="project-inline-kbd" aria-hidden="true">
+                B
+              </span>
             </button>
-          </Show>
-        </div>
+          </div>
 
-        <div class="project-page-header-side project-page-header-side--right">
-          <span class="project-page-header-meta">
-            {savingName() ? "Saving..." : formatProjectDate(props.project.createdAt)}
-          </span>
-        </div>
-      </header>
+          <div class="project-page-header-center">
+            <Show
+              when={!editingName()}
+              fallback={
+                <input
+                  class="project-page-title-input"
+                  type="text"
+                  value={draftName()}
+                  onInput={(event) => setDraftName(event.currentTarget.value)}
+                  onBlur={() => void submitRename()}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void submitRename();
+                    }
 
-      <Show when={renameError()}>
-        {(message) => <p class="project-workspace-error">{message()}</p>}
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      cancelRename();
+                    }
+                  }}
+                  maxlength={120}
+                  autofocus
+                />
+              }
+            >
+              <button
+                class="project-page-title-button"
+                type="button"
+                onClick={() => {
+                  setDraftName(props.project.name);
+                  setRenameError(null);
+                  setEditingName(true);
+                }}
+              >
+                {props.project.name}
+              </button>
+            </Show>
+          </div>
+
+          <div class="project-page-header-side project-page-header-side--right">
+            <Show when={!savingName()} fallback={<span class="project-page-header-meta">Saving...</span>}>
+              <ProjectHeaderClocks />
+            </Show>
+          </div>
+        </header>
+      </div>
+
+      <Show when={refreshingImports()}>
+        <div class="project-header-loading-state" role="status" aria-live="polite">
+          Refreshing Sentry projects...
+        </div>
       </Show>
 
-      <div class="project-workspace-hero">
-        <div class="project-workspace-copy">
-          <p class="project-workspace-subtitle">
-            {props.project.sentryOrganization?.name ?? "No Sentry organization selected"}
-          </p>
-          <p class="project-workspace-meta">
-            {formatSentryProjectCount(props.project.sentryProjects.length)} imported · Created{" "}
-            {formatProjectDate(props.project.createdAt)}
-          </p>
-        </div>
-        <ProjectSparkline seed={`${props.project.id}:${props.project.name}`} compact={false} />
-      </div>
+      <div class="project-workspace-body">
+        <Show when={renameError()}>
+          {(message) => <p class="project-workspace-error">{message()}</p>}
+        </Show>
 
-      <div class="project-workspace-grid">
-        <div class="logged-in-card">
-          <p class="logged-in-card-label">Project Overview</p>
-          <h3 class="logged-in-card-title">Telemetry ingestion</h3>
-          <p class="logged-in-card-copy">
-            This project workspace will hold imported Sentry issues, traces, and logs for the
-            linked repositories.
-          </p>
+        <div class="project-workspace-hero">
+          <div class="project-workspace-copy">
+            <p class="project-workspace-subtitle">
+              {props.project.sentryOrganization?.name ?? "No Sentry organization selected"}
+            </p>
+            <p class="project-workspace-meta">
+              {formatSentryProjectCount(props.project.sentryProjects.length)} imported · Created{" "}
+              {formatProjectDate(props.project.createdAt)}
+            </p>
+          </div>
+          <ProjectSparkline seed={`${props.project.id}:${props.project.name}`} compact={false} />
         </div>
-        <div class="logged-in-card">
-          <p class="logged-in-card-label">Next Section</p>
-          <h3 class="logged-in-card-title">Repository matching</h3>
-          <p class="logged-in-card-copy">
-            GitHub repo associations and unresolved Sentry project mappings will live in this area.
-          </p>
-        </div>
-        <div class="logged-in-card">
-          <p class="logged-in-card-label">Keyboard</p>
-          <h3 class="logged-in-card-title">Navigation</h3>
-          <p class="logged-in-card-copy">
-            Press <span class="project-inline-kbd">Esc</span> to return to the project list.
-          </p>
-        </div>
+
+        <ProjectSectionContent
+          activeSection={props.activeSection}
+          project={props.project}
+          onRefreshStateChange={setRefreshingImports}
+          onRefreshSentryProjects={props.onRefreshSentryProjects}
+          onUpdateSentryProjectSelection={props.onUpdateSentryProjectSelection}
+        />
       </div>
     </div>
+  );
+}
+
+function ProjectSectionContent(props: {
+  activeSection: ProjectRouteSection;
+  project: HotfixProject;
+  onRefreshStateChange: (refreshing: boolean) => void;
+  onRefreshSentryProjects: (projectId: string) => Promise<HotfixProject>;
+  onUpdateSentryProjectSelection: (projectId: string, includedProjectIds: string[]) => Promise<void>;
+}) {
+  const title = createMemo(() => {
+    switch (props.activeSection) {
+      case "home":
+        return {
+          eyebrow: "Overview",
+          heading: "Project home",
+          body: "This is the project overview page. It will become the launch surface for Sentry imports, repo mappings, and the latest health signals.",
+        };
+      case "logs":
+        return {
+          eyebrow: "Logs",
+          heading: "Log ingestion",
+          body: "This section will show imported application logs, request timelines, and linked source context for the current project.",
+        };
+      case "incidents":
+        return {
+          eyebrow: "Incidents",
+          heading: "Incident review",
+          body: "This section will become the incident queue for regressions, unresolved issues, and grouped production failures.",
+        };
+      case "performance":
+        return {
+          eyebrow: "Performance",
+          heading: "Trace analysis",
+          body: "This section will hold trace breakdowns, latency regressions, and correlated performance signals for the linked Sentry projects.",
+        };
+      case "settings":
+        return {
+          eyebrow: "Settings",
+          heading: "Project settings",
+          body: "Choose which imported Sentry projects should be included inside this Hotfix project.",
+        };
+    }
+  });
+
+  return (
+    <Show
+      when={props.activeSection === "settings"}
+      fallback={
+        <div class="project-workspace-grid">
+          <div class="logged-in-card">
+            <p class="logged-in-card-label">{title().eyebrow}</p>
+            <h3 class="logged-in-card-title">{title().heading}</h3>
+            <p class="logged-in-card-copy">{title().body}</p>
+          </div>
+          <div class="logged-in-card">
+            <p class="logged-in-card-label">Next Section</p>
+            <h3 class="logged-in-card-title">Planned surface</h3>
+            <p class="logged-in-card-copy">
+              This panel will be replaced with real project-specific views once the data model for{" "}
+              {title().eyebrow.toLowerCase()} is wired through.
+            </p>
+          </div>
+          <div class="logged-in-card">
+            <p class="logged-in-card-label">Keyboard</p>
+            <h3 class="logged-in-card-title">Navigation</h3>
+            <p class="logged-in-card-copy">
+              Press <span class="project-inline-kbd">B</span> to return to Projects.
+            </p>
+          </div>
+        </div>
+      }
+    >
+      <ProjectSettingsSection
+        project={props.project}
+        onRefreshStateChange={props.onRefreshStateChange}
+        onRefreshSentryProjects={props.onRefreshSentryProjects}
+        onUpdateSentryProjectSelection={props.onUpdateSentryProjectSelection}
+      />
+    </Show>
+  );
+}
+
+function ProjectSettingsSection(props: {
+  project: HotfixProject;
+  onRefreshStateChange: (refreshing: boolean) => void;
+  onRefreshSentryProjects: (projectId: string) => Promise<HotfixProject>;
+  onUpdateSentryProjectSelection: (projectId: string, includedProjectIds: string[]) => Promise<void>;
+}) {
+  const [draftIncludedIds, setDraftIncludedIds] = createSignal<string[]>(
+    props.project.sentryProjects.filter((project) => project.included).map((project) => project.id),
+  );
+  const [saving, setSaving] = createSignal(false);
+  const [refreshing, setRefreshing] = createSignal(false);
+  const [saveError, setSaveError] = createSignal<string | null>(null);
+  let autosaveTimeoutId: number | undefined;
+
+  createEffect(() => {
+    setDraftIncludedIds(
+      props.project.sentryProjects.filter((project) => project.included).map((project) => project.id),
+    );
+    setSaveError(null);
+  });
+
+  createEffect(() => {
+    if (import.meta.env.DEV) {
+      console.log("Hotfix Sentry project metadata", props.project.sentryProjects);
+    }
+  });
+
+  const isDirty = createMemo(() => {
+    const current = new Set(props.project.sentryProjects.filter((project) => project.included).map((project) => project.id));
+    const draft = new Set(draftIncludedIds());
+    if (current.size !== draft.size) {
+      return true;
+    }
+
+    for (const id of draft) {
+      if (!current.has(id)) {
+        return true;
+      }
+    }
+
+    return false;
+  });
+
+  const toggleProject = (projectId: string) => {
+    setDraftIncludedIds((current) =>
+      current.includes(projectId) ? current.filter((id) => id !== projectId) : [...current, projectId],
+    );
+  };
+
+  const saveSelection = async (includedProjectIds: string[]) => {
+    if (saving()) {
+      autosaveTimeoutId = window.setTimeout(() => {
+        void saveSelection(includedProjectIds);
+      }, 180);
+      return;
+    }
+
+    if (!isDirty()) {
+      return;
+    }
+
+    setSaving(true);
+    setSaveError(null);
+
+    try {
+      await props.onUpdateSentryProjectSelection(props.project.id, includedProjectIds);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not update Sentry project selection.";
+      setSaveError(message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  createEffect(() => {
+    const nextIncludedIds = [...draftIncludedIds()];
+    const dirty = isDirty();
+
+    if (autosaveTimeoutId !== undefined) {
+      window.clearTimeout(autosaveTimeoutId);
+      autosaveTimeoutId = undefined;
+    }
+
+    if (!dirty) {
+      return;
+    }
+
+    autosaveTimeoutId = window.setTimeout(() => {
+      void saveSelection(nextIncludedIds);
+    }, 420);
+  });
+
+  onCleanup(() => {
+    if (autosaveTimeoutId !== undefined) {
+      window.clearTimeout(autosaveTimeoutId);
+    }
+    props.onRefreshStateChange(false);
+  });
+
+  const refreshSelection = async () => {
+    if (refreshing()) {
+      return;
+    }
+
+    setRefreshing(true);
+    props.onRefreshStateChange(true);
+    setSaveError(null);
+
+    try {
+      const updatedProject = await props.onRefreshSentryProjects(props.project.id);
+      if (import.meta.env.DEV) {
+        console.log("Hotfix refreshed Sentry project metadata", updatedProject.sentryProjects);
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not refresh imported Sentry projects.";
+      setSaveError(message);
+    } finally {
+      setRefreshing(false);
+      props.onRefreshStateChange(false);
+    }
+  };
+
+  return (
+    <div class="project-settings-shell">
+      <div class="project-settings-header">
+        <div>
+          <p class="logged-in-card-label">Settings</p>
+          <h2 class="project-settings-title">Included Sentry projects</h2>
+          <p class="project-settings-copy">
+            Select the imported Sentry projects that should be included in this Hotfix project.
+          </p>
+        </div>
+
+        <div class="project-settings-actions">
+          <button
+            class="secondary-button"
+            type="button"
+            onClick={() => void refreshSelection()}
+            disabled={refreshing()}
+          >
+            {refreshing() ? "Refreshing..." : "Refresh from Sentry"}
+          </button>
+          <Show when={saving() || isDirty()}>
+            <p class="project-settings-status">
+              {saving() ? "Saving changes..." : "Changes pending..."}
+            </p>
+          </Show>
+        </div>
+      </div>
+
+      <Show
+        when={props.project.sentryProjects.length > 0}
+        fallback={
+          <div class="logged-in-card">
+            <p class="logged-in-card-label">No Sentry projects</p>
+            <h3 class="logged-in-card-title">Nothing to configure yet</h3>
+            <p class="logged-in-card-copy">
+              Connect a Sentry organization and import its projects before configuring inclusion here.
+            </p>
+          </div>
+        }
+      >
+        <div class="project-settings-list" role="group" aria-label="Included Sentry projects">
+          <For each={props.project.sentryProjects}>
+            {(sentryProject) => {
+              const checked = () => draftIncludedIds().includes(sentryProject.id);
+
+              return (
+                <label class="project-settings-item">
+                  <span class="project-settings-checkbox-wrap">
+                    <input
+                      class="project-settings-checkbox"
+                      type="checkbox"
+                      checked={checked()}
+                      onInput={() => toggleProject(sentryProject.id)}
+                    />
+                  </span>
+                  <span class="project-settings-item-copy">
+                    <span class="project-settings-item-title">{sentryProject.name}</span>
+                    <span class="project-settings-item-meta">
+                      {sentryProject.slug}
+                      <Show when={sentryProject.platform}>
+                        {(platform) => ` · ${platform()}`}
+                      </Show>
+                    </span>
+                  </span>
+                </label>
+              );
+            }}
+          </For>
+        </div>
+      </Show>
+
+      <Show when={saveError()}>
+        {(message) => <p class="project-workspace-error">{message()}</p>}
+      </Show>
+    </div>
+  );
+}
+
+function ProjectHeaderClocks() {
+  const [now, setNow] = createSignal(Date.now());
+  const [showLocalTime, setShowLocalTime] = createSignal(false);
+  const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  onMount(() => {
+    const intervalId = window.setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+
+    onCleanup(() => {
+      window.clearInterval(intervalId);
+    });
+  });
+
+  return (
+    <button
+      class="project-header-clock-button"
+      type="button"
+      aria-label="Current time"
+      onMouseEnter={() => setShowLocalTime(true)}
+      onMouseLeave={() => setShowLocalTime(false)}
+      onFocus={() => setShowLocalTime(true)}
+      onBlur={() => setShowLocalTime(false)}
+    >
+      <span class="project-header-clock-label">
+        {showLocalTime() ? `Local time now (${localTimeZone}):` : "UTC time now:"}
+      </span>
+      <span class="project-header-clock-value">
+        {showLocalTime() ? formatHeaderClock(now()) : formatHeaderClock(now(), "UTC")}
+      </span>
+    </button>
   );
 }
 
@@ -1694,7 +2183,7 @@ function SettingsTab(props: {
   );
 }
 
-function SidebarIcon(props: { tab: AppTab }) {
+function SidebarIcon(props: { tab: AppTab | ProjectRouteSection }) {
   return (
     <span class="app-sidebar-icon" aria-hidden="true">
       <Show when={props.tab === "projects"}>
@@ -1702,9 +2191,25 @@ function SidebarIcon(props: { tab: AppTab }) {
           <path d="M2.5 3.5h11v3h-11zM2.5 8.5h11v4h-11z" stroke="currentColor" stroke-width="1.2" />
         </svg>
       </Show>
-      <Show when={props.tab === "usage"}>
+      <Show when={props.tab === "home"}>
+        <svg viewBox="0 0 16 16" fill="none">
+          <path d="M3 7.25 8 3l5 4.25v5.25H9.75v-3H6.25v3H3V7.25Z" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round" />
+        </svg>
+      </Show>
+      <Show when={props.tab === "usage" || props.tab === "performance"}>
         <svg viewBox="0 0 16 16" fill="none">
           <path d="M3 11.5V8.25M8 11.5V4.5M13 11.5V6.25" stroke="currentColor" stroke-width="1.2" />
+        </svg>
+      </Show>
+      <Show when={props.tab === "logs"}>
+        <svg viewBox="0 0 16 16" fill="none">
+          <path d="M3 4.25h10M3 8h10M3 11.75h6.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+        </svg>
+      </Show>
+      <Show when={props.tab === "incidents"}>
+        <svg viewBox="0 0 16 16" fill="none">
+          <path d="M8 2.75 13 12.5H3L8 2.75Z" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round" />
+          <path d="M8 6.1v2.8M8 10.9h.01" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" />
         </svg>
       </Show>
       <Show when={props.tab === "settings"}>
@@ -1773,12 +2278,21 @@ function LegalSection(props: { title: string; body: string }) {
 }
 
 function isEditableTarget(target: EventTarget | null) {
-  if (
-    target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement
-  ) {
+  if (target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
     return true;
+  }
+
+  if (target instanceof HTMLInputElement) {
+    const textLikeTypes = new Set([
+      "text",
+      "search",
+      "email",
+      "password",
+      "url",
+      "tel",
+      "number",
+    ]);
+    return textLikeTypes.has(target.type);
   }
 
   return target instanceof HTMLElement && target.isContentEditable;
@@ -1801,26 +2315,60 @@ function formatProjectDate(createdAt: number | string) {
   }).format(date);
 }
 
-function getProjectSlugFromPath(pathname: string) {
+function formatHeaderClock(timestamp: number, timeZone?: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone,
+    timeZoneName: "short",
+  }).format(new Date(timestamp));
+}
+
+function getProjectRoute(pathname: string): ProjectRouteState {
   if (!pathname || pathname === "/") {
-    return null;
+    return { slug: null, section: "home" };
   }
 
   const segments = pathname.split("/").filter(Boolean);
-  if (segments.length !== 1) {
-    return null;
+  if (!segments.length || segments.length > 2) {
+    return { slug: null, section: "home" };
   }
 
-  const [segment] = segments;
-  if (!segment || segment === "api" || segment === "terms" || segment === "privacy") {
-    return null;
+  const [slugSegment, sectionSegment] = segments;
+  if (!slugSegment || slugSegment === "api" || slugSegment === "terms" || slugSegment === "privacy") {
+    return { slug: null, section: "home" };
   }
 
-  return decodeURIComponent(segment);
+  const slug = decodeURIComponent(slugSegment);
+  if (!sectionSegment) {
+    return { slug, section: "home" };
+  }
+
+  const section = decodeURIComponent(sectionSegment);
+  if (!isProjectSectionTab(section)) {
+    return { slug: null, section: "home" };
+  }
+
+  return { slug, section };
 }
 
-function getProjectPath(slug: string | null) {
-  return slug ? `/${encodeURIComponent(slug)}` : "/";
+function getProjectPath(slug: string | null, section: ProjectRouteSection) {
+  if (!slug) {
+    return "/";
+  }
+
+  const encodedSlug = encodeURIComponent(slug);
+  if (section === "home") {
+    return `/${encodedSlug}`;
+  }
+
+  return `/${encodedSlug}/${section}`;
+}
+
+function isProjectSectionTab(value: string): value is ProjectSectionTab {
+  return value === "logs" || value === "incidents" || value === "performance" || value === "settings";
 }
 
 function getProjectCreatedAtTimestamp(createdAt: number | string) {

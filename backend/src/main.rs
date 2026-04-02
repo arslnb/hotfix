@@ -526,6 +526,7 @@ struct ImportedSentryProjectPayload {
     slug: String,
     name: String,
     platform: Option<String>,
+    included: bool,
     repo_mapping: Option<GitHubRepoMappingPayload>,
 }
 
@@ -572,6 +573,12 @@ struct UpdateHotfixProjectInput {
     name: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateSentryProjectSelectionInput {
+    included_project_ids: Vec<Uuid>,
+}
+
 #[derive(Debug, FromRow)]
 struct HotfixProjectRow {
     id: Uuid,
@@ -591,6 +598,7 @@ struct ImportedSentryProjectRow {
     slug: String,
     name: String,
     platform: Option<String>,
+    included: bool,
     github_repo_id: Option<i64>,
     github_repo_full_name: Option<String>,
     github_repo_url: Option<String>,
@@ -705,6 +713,14 @@ async fn main() -> Result<(), AppError> {
         .route(
             "/hotfix-projects/{project_id}/sentry-connection",
             post(assign_sentry_connection),
+        )
+        .route(
+            "/hotfix-projects/{project_id}/sentry-project-selection",
+            post(update_sentry_project_selection),
+        )
+        .route(
+            "/hotfix-projects/{project_id}/refresh-sentry-projects",
+            post(refresh_sentry_projects),
         )
         .route(
             "/imported-sentry-projects/{imported_project_id}/repo-mapping",
@@ -911,6 +927,118 @@ async fn update_hotfix_project(
     .bind(user_id)
     .execute(&state.db)
     .await?;
+
+    let payload = build_single_hotfix_project_payload(&state, user_id, project_id).await?;
+    Ok(Json(payload))
+}
+
+async fn update_sentry_project_selection(
+    State(state): State<AppState>,
+    session: Session,
+    AxumPath(project_id): AxumPath<Uuid>,
+    Json(input): Json<UpdateSentryProjectSelectionInput>,
+) -> Result<Json<HotfixProjectPayload>, AppError> {
+    let user_id = require_user_id(&session).await?;
+    ensure_hotfix_project_owner(&state.db, user_id, project_id).await?;
+
+    let existing_ids = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        select id
+        from imported_sentry_projects
+        where hotfix_project_id = $1
+        "#,
+    )
+    .bind(project_id)
+    .fetch_all(&state.db)
+    .await?;
+
+    let existing_set = existing_ids.iter().copied().collect::<HashSet<_>>();
+    for project_id in &input.included_project_ids {
+        if !existing_set.contains(project_id) {
+            return Err(AppError::BadRequest(
+                "One or more selected Sentry projects do not belong to this project.".into(),
+            ));
+        }
+    }
+
+    let mut tx = state.db.begin().await?;
+    sqlx::query(
+        r#"
+        update imported_sentry_projects
+        set included = false, updated_at = now()
+        where hotfix_project_id = $1
+        "#,
+    )
+    .bind(project_id)
+    .execute(&mut *tx)
+    .await?;
+
+    if !input.included_project_ids.is_empty() {
+        sqlx::query(
+            r#"
+            update imported_sentry_projects
+            set included = true, updated_at = now()
+            where hotfix_project_id = $1
+              and id = any($2)
+            "#,
+        )
+        .bind(project_id)
+        .bind(&input.included_project_ids)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+
+    let payload = build_single_hotfix_project_payload(&state, user_id, project_id).await?;
+    Ok(Json(payload))
+}
+
+async fn refresh_sentry_projects(
+    State(state): State<AppState>,
+    session: Session,
+    AxumPath(project_id): AxumPath<Uuid>,
+) -> Result<Json<HotfixProjectPayload>, AppError> {
+    let user_id = require_user_id(&session).await?;
+    ensure_hotfix_project_owner(&state.db, user_id, project_id).await?;
+
+    let sentry_connection_id = sqlx::query_scalar::<_, Option<Uuid>>(
+        r#"
+        select sentry_connection_id
+        from hotfix_projects
+        where id = $1 and user_id = $2
+        "#,
+    )
+    .bind(project_id)
+    .bind(user_id)
+    .fetch_optional(&state.db)
+    .await?
+    .flatten()
+    .ok_or_else(|| {
+        AppError::BadRequest("Connect a Sentry organization before refreshing imported projects.".into())
+    })?;
+
+    let mut tx = state.db.begin().await?;
+    let connection =
+        load_provider_connection_with_executor(&mut tx, user_id, sentry_connection_id).await?;
+    if connection.provider != Provider::Sentry.as_str() {
+        return Err(AppError::BadRequest(
+            "That connection is not a Sentry organization.".into(),
+        ));
+    }
+
+    let access_token = decrypt_provider_token(
+        &state.config.session_secret,
+        &connection.access_token_nonce,
+        &connection.access_token_ciphertext,
+    )?;
+    let organization_slug = connection.slug.as_deref().ok_or_else(|| {
+        AppError::BadRequest("The Sentry connection is missing an organization slug.".into())
+    })?;
+    let sentry_projects = fetch_all_sentry_projects(&state, &access_token, organization_slug).await?;
+
+    sync_imported_sentry_projects(&mut tx, project_id, connection.id, &sentry_projects).await?;
+    tx.commit().await?;
 
     let payload = build_single_hotfix_project_payload(&state, user_id, project_id).await?;
     Ok(Json(payload))
@@ -1745,6 +1873,7 @@ async fn build_dashboard_payload(
                 imported_sentry_projects.slug,
                 imported_sentry_projects.name,
                 imported_sentry_projects.platform,
+                imported_sentry_projects.included,
                 sentry_project_repo_mappings.github_repo_id,
                 sentry_project_repo_mappings.github_repo_full_name,
                 sentry_project_repo_mappings.github_repo_url,
@@ -1786,6 +1915,7 @@ async fn build_dashboard_payload(
                     slug: row.slug.clone(),
                     name: row.name.clone(),
                     platform: row.platform.clone(),
+                    included: row.included,
                     repo_mapping: row.github_repo_id.map(|repo_id| GitHubRepoMappingPayload {
                         repo_id,
                         full_name: row.github_repo_full_name.clone().unwrap_or_default(),
