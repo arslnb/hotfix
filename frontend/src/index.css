@@ -1456,6 +1456,12 @@ button {
   inset: 0;
 }
 
+.project-graph-node-socket-anchor > rete-ref {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 .project-home-canvas .project-graph-node-socket-anchor.is-input {
   z-index: 1;
 }
@@ -1474,6 +1480,8 @@ button {
 
 .project-graph-socket {
   display: block;
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   cursor: crosshair;
