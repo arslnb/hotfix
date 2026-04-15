@@ -625,6 +625,15 @@ async function mountProjectGraphEditor(
   area.use(connection as any);
   area.use(render);
   connection.addPreset(ConnectionPresets.classic.setup());
+  connection.addPipe((context: any) => {
+    if (context.type === "connectionpick") {
+      container.classList.add("is-connecting");
+    } else if (context.type === "connectiondrop") {
+      container.classList.remove("is-connecting");
+    }
+
+    return context;
+  });
   AreaExtensions.restrictor(area, {
     scaling: {
       min: GRAPH_ZOOM_MIN,
@@ -637,11 +646,14 @@ async function mountProjectGraphEditor(
   render.addPipe((context: any) => {
     if (context.type === "connectionpath") {
       const [start, end] = context.data.points;
+      const sourceLeadX = start.x + 32;
+      const targetLeadX = end.x + 32;
+      const trunkX = Math.max(sourceLeadX, targetLeadX) + 18;
       return {
         ...context,
         data: {
           ...context.data,
-          path: `M ${start.x} ${start.y} L ${end.x} ${end.y}`,
+          path: `M ${start.x} ${start.y} L ${sourceLeadX} ${start.y} L ${trunkX} ${start.y} L ${trunkX} ${end.y} L ${targetLeadX} ${end.y} L ${end.x} ${end.y}`,
         },
       };
     }
@@ -676,14 +688,6 @@ async function mountProjectGraphEditor(
                 data-node-id=${node.id}
                 aria-label=${node.label}
               >
-                <span class="project-graph-node-socket-anchor is-input" aria-hidden="true">
-                  <rete-ref .data=${inputSocketData} .emit=${emit}></rete-ref>
-                </span>
-
-                <span class="project-graph-node-socket-anchor is-output" aria-hidden="true">
-                  <rete-ref .data=${outputSocketData} .emit=${emit}></rete-ref>
-                </span>
-
                 <div class="project-graph-node-card-body">
                   <div class="project-graph-node-card-top">
                     <div class="project-graph-node-card-header">
@@ -696,18 +700,37 @@ async function mountProjectGraphEditor(
                       </div>
                     </div>
 
-                    <button
-                      class="project-graph-node-drag-handle"
-                      type="button"
-                      tabindex="-1"
-                      data-node-drag-handle
-                      aria-label="Drag node"
-                    >
-                      <span></span>
-                      <span></span>
-                      <span></span>
-                      <span></span>
-                    </button>
+                    <div class="project-graph-node-actions">
+                      <button
+                        class="project-graph-node-drag-handle"
+                        type="button"
+                        tabindex="-1"
+                        data-node-drag-handle
+                        aria-label="Drag node"
+                      >
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                      </button>
+
+                      <span class="project-graph-node-connect-handle" aria-hidden="true">
+                        <span class="project-graph-node-connect-icon" aria-hidden="true">
+                          <svg viewBox="0 0 16 16" fill="none">
+                            <path d="M4.25 8h7.5" />
+                            <path d="M5.5 5.5H3.75v1.75H5.5z" />
+                            <path d="M12.25 8.75h-1.75v1.75h1.75z" />
+                            <path d="M12.25 3.75h-1.75V5.5h1.75z" />
+                          </svg>
+                        </span>
+                        <span class="project-graph-node-socket-anchor is-input">
+                          <rete-ref .data=${inputSocketData} .emit=${emit}></rete-ref>
+                        </span>
+                        <span class="project-graph-node-socket-anchor is-output">
+                          <rete-ref .data=${outputSocketData} .emit=${emit}></rete-ref>
+                        </span>
+                      </span>
+                    </div>
                   </div>
 
                   <div class="project-graph-node-card-metrics">
@@ -1039,6 +1062,7 @@ async function mountProjectGraphEditor(
       window.removeEventListener("pointerup", clearPointerTracking, true);
       window.removeEventListener("pointercancel", clearPointerTracking, true);
       resizeObserver.disconnect();
+      container.classList.remove("is-connecting");
       area.destroy();
       container.replaceChildren();
     },

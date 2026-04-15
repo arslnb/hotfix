@@ -1322,44 +1322,6 @@ button {
   background: #050709;
 }
 
-.project-graph-node-socket-anchor {
-  position: absolute;
-  top: 50%;
-  z-index: 2;
-  transform: translateY(-50%);
-}
-
-.project-graph-node-socket-anchor.is-input {
-  left: 0.55rem;
-}
-
-.project-graph-node-socket-anchor.is-output {
-  right: 0.55rem;
-}
-
-.project-graph-socket {
-  display: block;
-  width: 0.7rem;
-  height: 0.7rem;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 999px;
-  background:
-    radial-gradient(circle at center, rgba(127, 220, 255, 0.92) 0 40%, rgba(127, 220, 255, 0.18) 41% 100%),
-    #040608;
-  box-shadow: 0 0 0 0.18rem rgba(127, 220, 255, 0.04);
-  transition:
-    border-color 150ms ease,
-    background-color 150ms ease,
-    box-shadow 150ms ease,
-    transform 150ms ease;
-}
-
-.project-graph-socket:hover {
-  border-color: rgba(127, 220, 255, 0.54);
-  box-shadow: 0 0 0 0.22rem rgba(127, 220, 255, 0.08);
-  transform: scale(1.06);
-}
-
 .project-graph-node-card-body {
   display: flex;
   min-height: 6.95rem;
@@ -1403,6 +1365,13 @@ button {
   min-width: 0;
 }
 
+.project-graph-node-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  flex: none;
+}
+
 .project-graph-node-drag-handle {
   display: inline-grid;
   grid-template-columns: repeat(2, 0.18rem);
@@ -1439,6 +1408,76 @@ button {
 
 .project-graph-node-drag-handle:active {
   cursor: grabbing;
+}
+
+.project-graph-node-connect-handle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  flex: none;
+  border: 1px solid rgba(127, 220, 255, 0.34);
+  border-radius: 4px;
+  background: rgba(127, 220, 255, 0.05);
+  color: rgba(127, 220, 255, 0.84);
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease,
+    color 150ms ease;
+}
+
+.project-graph-node-connect-handle:hover {
+  border-color: rgba(127, 220, 255, 0.58);
+  background: rgba(127, 220, 255, 0.085);
+  color: rgba(164, 240, 255, 0.94);
+}
+
+.project-graph-node-connect-icon {
+  display: inline-flex;
+  width: 0.92rem;
+  height: 0.92rem;
+  pointer-events: none;
+}
+
+.project-graph-node-connect-icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  stroke: currentColor;
+  stroke-width: 1.15;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.project-graph-node-socket-anchor {
+  position: absolute;
+  inset: 0;
+}
+
+.project-home-canvas .project-graph-node-socket-anchor.is-input {
+  z-index: 1;
+}
+
+.project-home-canvas .project-graph-node-socket-anchor.is-output {
+  z-index: 2;
+}
+
+.project-home-canvas.is-connecting .project-graph-node-socket-anchor.is-input {
+  z-index: 3;
+}
+
+.project-home-canvas.is-connecting .project-graph-node-socket-anchor.is-output {
+  z-index: 1;
+}
+
+.project-graph-socket {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  opacity: 0;
 }
 
 .project-graph-node-card-title,
