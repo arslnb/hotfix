@@ -1299,6 +1299,7 @@ button {
 .project-graph-node-card {
   width: 15.5rem;
   overflow: hidden;
+  position: relative;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: #000;
@@ -1321,14 +1322,42 @@ button {
   background: #050709;
 }
 
-.project-graph-node-card.is-link-source,
-.project-graph-node-card.is-link-target {
-  border-color: rgba(127, 220, 255, 0.78);
-  background: #050709;
+.project-graph-node-socket-anchor {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  transform: translateY(-50%);
 }
 
-.project-graph-node-card.is-link-target {
-  box-shadow: inset 0 0 0 1px rgba(127, 220, 255, 0.18);
+.project-graph-node-socket-anchor.is-input {
+  left: 0.55rem;
+}
+
+.project-graph-node-socket-anchor.is-output {
+  right: 0.55rem;
+}
+
+.project-graph-socket {
+  display: block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at center, rgba(127, 220, 255, 0.92) 0 40%, rgba(127, 220, 255, 0.18) 41% 100%),
+    #040608;
+  box-shadow: 0 0 0 0.18rem rgba(127, 220, 255, 0.04);
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease,
+    box-shadow 150ms ease,
+    transform 150ms ease;
+}
+
+.project-graph-socket:hover {
+  border-color: rgba(127, 220, 255, 0.54);
+  box-shadow: 0 0 0 0.22rem rgba(127, 220, 255, 0.08);
+  transform: scale(1.06);
 }
 
 .project-graph-node-card-body {

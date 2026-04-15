@@ -117,11 +117,15 @@ type CreateProjectGraphEdgeInput = {
 
 type GraphVisualState = {
   selectedNodeId: string | null;
-  linkSourceNodeId: string | null;
-  linkTargetNodeId: string | null;
 };
 
 type EdgeDraft = CreateProjectGraphEdgeInput;
+
+type PendingConnectionDraft = {
+  connectionId: string;
+  sourceNodeId: string;
+  targetNodeId: string;
+};
 
 type ProjectHomeGraphProps = {
   projectId: string;
@@ -148,6 +152,7 @@ type EditorHandle = {
   setVisualState: (state: GraphVisualState) => void;
   fitToView: (scale?: number) => Promise<void>;
   zoomBy: (multiplier: number) => Promise<void>;
+  removeConnection: (connectionId: string) => Promise<void>;
 };
 
 async function fetchJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
@@ -589,12 +594,20 @@ async function mountProjectGraphEditor(
   graph: ProjectGraphPayload,
   onLayoutChange: (nodes: ProjectGraphLayoutNode[]) => Promise<void>,
   onNodeActivate: (nodeId: string | null) => void,
+  onConnectionDraft: (draft: PendingConnectionDraft) => void,
 ): Promise<EditorHandle> {
-  const [{ NodeEditor, ClassicPreset }, { AreaPlugin, AreaExtensions }, { LitPlugin, Presets }, { html }] =
+  const [
+    { NodeEditor, ClassicPreset },
+    { AreaPlugin, AreaExtensions },
+    { LitPlugin, Presets: LitPresets },
+    { ConnectionPlugin, Presets: ConnectionPresets },
+    { html },
+  ] =
     await Promise.all([
       import("rete"),
       import("rete-area-plugin"),
       import("@retejs/lit-plugin"),
+      import("rete-connection-plugin"),
       import("lit"),
     ]);
 
@@ -603,12 +616,15 @@ async function mountProjectGraphEditor(
   const editor = new NodeEditor<any>();
   const area = new AreaPlugin<any>(container);
   const render = new LitPlugin<any>();
+  const connection = new ConnectionPlugin<any>();
   const resizeObserver = new ResizeObserver(() => {
     void area.area.translate(area.area.transform.x, area.area.transform.y);
   });
 
   editor.use(area);
+  area.use(connection as any);
   area.use(render);
+  connection.addPreset(ConnectionPresets.classic.setup());
   AreaExtensions.restrictor(area, {
     scaling: {
       min: GRAPH_ZOOM_MIN,
@@ -634,17 +650,40 @@ async function mountProjectGraphEditor(
   });
 
   render.addPreset(
-    Presets.classic.setup({
+    LitPresets.classic.setup({
       customize: {
         node(context) {
           const node = (context.payload as ProjectGraphNodeInstance).graphNode as ProjectGraphNode;
-          return () =>
-            html`
+          return ({ emit }) => {
+            const inputSocketData = {
+              type: "socket",
+              side: "input",
+              key: "in",
+              nodeId: node.id,
+              payload: (context.payload as any).inputs?.in?.socket ?? null,
+            };
+            const outputSocketData = {
+              type: "socket",
+              side: "output",
+              key: "out",
+              nodeId: node.id,
+              payload: (context.payload as any).outputs?.out?.socket ?? null,
+            };
+
+            return html`
               <article
                 class="project-graph-node-card ${nodeStatusClass(node)}"
                 data-node-id=${node.id}
                 aria-label=${node.label}
               >
+                <span class="project-graph-node-socket-anchor is-input" aria-hidden="true">
+                  <rete-ref .data=${inputSocketData} .emit=${emit}></rete-ref>
+                </span>
+
+                <span class="project-graph-node-socket-anchor is-output" aria-hidden="true">
+                  <rete-ref .data=${outputSocketData} .emit=${emit}></rete-ref>
+                </span>
+
                 <div class="project-graph-node-card-body">
                   <div class="project-graph-node-card-top">
                     <div class="project-graph-node-card-header">
@@ -699,6 +738,19 @@ async function mountProjectGraphEditor(
                   ></project-mini-chart>
                 </div>
               </article>
+            `;
+          };
+        },
+        socket(context) {
+          return () =>
+            html`
+              <span
+                class="project-graph-socket project-graph-socket--${context.side}"
+                data-node-socket
+                data-node-id=${context.nodeId}
+                data-socket-side=${context.side}
+                aria-hidden="true"
+              ></span>
             `;
         },
         connection(context) {
@@ -759,6 +811,35 @@ async function mountProjectGraphEditor(
     }
   }
 
+  let hydratingConnections = true;
+
+  editor.addPipe((context: any) => {
+    if (context.type === "connectioncreated") {
+      const nextConnection = context.data as {
+        id: string;
+        source: string;
+        target: string;
+        isPseudo?: boolean;
+      };
+
+      if (!hydratingConnections && !nextConnection.isPseudo) {
+        window.queueMicrotask(() => {
+          if (!editor.getConnection(nextConnection.id)) {
+            return;
+          }
+
+          onConnectionDraft({
+            connectionId: nextConnection.id,
+            sourceNodeId: nextConnection.source,
+            targetNodeId: nextConnection.target,
+          });
+        });
+      }
+    }
+
+    return context;
+  });
+
   const nodesById = new Map<string, ProjectGraphNodeInstance>();
   for (const node of graph.nodes) {
     const nextNode = new ProjectGraphNodeInstance(node);
@@ -778,6 +859,7 @@ async function mountProjectGraphEditor(
     connection.id = edge.id;
     await editor.addConnection(connection);
   }
+  hydratingConnections = false;
 
   if (nodesById.size > 0) {
     await AreaExtensions.zoomAt(area, Array.from(nodesById.values()) as any[], {
@@ -790,8 +872,6 @@ async function mountProjectGraphEditor(
     for (const card of nodeCards) {
       const nodeId = card.dataset.nodeId ?? null;
       card.classList.toggle("is-selected", nodeId === state.selectedNodeId);
-      card.classList.toggle("is-link-source", nodeId === state.linkSourceNodeId);
-      card.classList.toggle("is-link-target", nodeId === state.linkTargetNodeId);
     }
   };
 
@@ -816,6 +896,14 @@ async function mountProjectGraphEditor(
 
     const card = target.closest<HTMLElement>("[data-node-id]");
     if (!card?.dataset.nodeId) {
+      return;
+    }
+
+    if (target.closest("[data-node-socket]")) {
+      pointerCandidate = null;
+      activePointerNodeId = null;
+      draggedNodeId = null;
+      translatedDuringPointer = false;
       return;
     }
 
@@ -873,7 +961,7 @@ async function mountProjectGraphEditor(
       return;
     }
 
-    if (target.closest(GRAPH_DRAG_HANDLE_SELECTOR)) {
+    if (target.closest(GRAPH_DRAG_HANDLE_SELECTOR) || target.closest("[data-node-socket]")) {
       return;
     }
 
@@ -979,12 +1067,17 @@ async function mountProjectGraphEditor(
 
       await area.area.zoom(nextZoom, offsetX, offsetY);
     },
+    async removeConnection(connectionId: string) {
+      if (!editor.getConnection(connectionId)) {
+        return;
+      }
+
+      await editor.removeConnection(connectionId);
+    },
   };
 }
 
 function GraphControls(props: {
-  linkActive: boolean;
-  onToggleLink: () => void;
   onReorganize: () => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
@@ -993,19 +1086,6 @@ function GraphControls(props: {
   return (
     <div class="project-home-controls" aria-label="Graph controls">
       <div class="project-home-control-group">
-        <button
-          class="project-home-control-button"
-          classList={{ "is-active": props.linkActive }}
-          type="button"
-          aria-label={props.linkActive ? "Exit link mode" : "Link two nodes"}
-          onClick={props.onToggleLink}
-        >
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M8.5 8.5 5.8 11.2a3.4 3.4 0 0 0 0 4.8 3.4 3.4 0 0 0 4.8 0l2.3-2.3" />
-            <path d="m15.5 15.5 2.7-2.7a3.4 3.4 0 0 0 0-4.8 3.4 3.4 0 0 0-4.8 0l-2.3 2.3" />
-            <path d="m9.5 14.5 5-5" />
-          </svg>
-        </button>
         <button
           class="project-home-control-button"
           type="button"
@@ -1345,8 +1425,7 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
     async () => fetchProjectGraph(props.projectId),
   );
   const [selectedNodeId, setSelectedNodeId] = createSignal<string | null>(null);
-  const [linkMode, setLinkMode] = createSignal(false);
-  const [linkSourceNodeId, setLinkSourceNodeId] = createSignal<string | null>(null);
+  const [pendingEdgeConnectionId, setPendingEdgeConnectionId] = createSignal<string | null>(null);
   const [edgeDraft, setEdgeDraft] = createSignal<EdgeDraft | null>(null);
   const [edgeSaveError, setEdgeSaveError] = createSignal<string | null>(null);
   const [edgeSaving, setEdgeSaving] = createSignal(false);
@@ -1360,15 +1439,15 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
   );
   const isEmpty = createMemo(() => !graph.loading && !graph.error && (graph()?.nodes.length ?? 0) === 0);
   const hasPanel = createMemo(() => Boolean(selectedNode()));
-  const linkSourceNode = createMemo(
-    () => graph()?.nodes.find((node) => node.id === linkSourceNodeId()) ?? null,
-  );
   const edgeTargetNode = createMemo(
     () => graph()?.nodes.find((node) => node.id === edgeDraft()?.targetNodeId) ?? null,
   );
+  const edgeSourceNode = createMemo(
+    () => graph()?.nodes.find((node) => node.id === edgeDraft()?.sourceNodeId) ?? null,
+  );
   const edgeComposerState = createMemo(() => {
     const draft = edgeDraft();
-    const source = linkSourceNode();
+    const source = edgeSourceNode();
     const target = edgeTargetNode();
 
     return draft && source && target
@@ -1387,35 +1466,38 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
   const applyEditorVisualState = () => {
     editorHandle?.setVisualState({
       selectedNodeId: selectedNodeId(),
-      linkSourceNodeId: linkSourceNodeId(),
-      linkTargetNodeId: edgeDraft()?.targetNodeId ?? null,
     });
   };
 
-  const clearEdgeComposer = () => {
+  const resetEdgeComposerState = () => {
     setEdgeDraft(null);
     setEdgeSaveError(null);
     setEdgeSaving(false);
   };
 
-  const cancelLinkMode = () => {
-    setLinkMode(false);
-    setLinkSourceNodeId(null);
-    clearEdgeComposer();
-    applyEditorVisualState();
-  };
+  const removePendingEdgeConnection = async () => {
+    const connectionId = pendingEdgeConnectionId();
+    setPendingEdgeConnectionId(null);
 
-  const toggleLinkMode = () => {
-    if (linkMode()) {
-      cancelLinkMode();
+    if (!connectionId) {
       return;
     }
 
-    setSelectedNodeId(null);
-    setLinkMode(true);
-    setLinkSourceNodeId(null);
-    clearEdgeComposer();
-    applyEditorVisualState();
+    try {
+      await editorHandle?.removeConnection(connectionId);
+    } catch (error) {
+      console.error("Could not remove draft graph connection", error);
+    }
+  };
+
+  const closeEdgeComposer = (options?: { removeConnection?: boolean }) => {
+    resetEdgeComposerState();
+    if (options?.removeConnection === false) {
+      setPendingEdgeConnectionId(null);
+      return;
+    }
+
+    void removePendingEdgeConnection();
   };
 
   const reorganizeGraph = async () => {
@@ -1445,26 +1527,26 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
       return;
     }
 
-    if (linkMode()) {
-      if (!linkSourceNodeId()) {
-        setLinkSourceNodeId(nodeId);
-        applyEditorVisualState();
-        return;
-      }
+    setSelectedNodeId(nodeId);
+  };
 
-      if (linkSourceNodeId() === nodeId) {
-        setLinkSourceNodeId(null);
-        applyEditorVisualState();
-        return;
-      }
-
-      setEdgeSaveError(null);
-      setEdgeDraft(createDefaultEdgeDraft(linkSourceNodeId()!, nodeId));
-      applyEditorVisualState();
+  const handleConnectionDraft = (draft: PendingConnectionDraft) => {
+    if (draft.sourceNodeId === draft.targetNodeId) {
+      void editorHandle?.removeConnection(draft.connectionId);
       return;
     }
 
-    setSelectedNodeId(nodeId);
+    const previousConnectionId = pendingEdgeConnectionId();
+    if (previousConnectionId && previousConnectionId !== draft.connectionId) {
+      void editorHandle?.removeConnection(previousConnectionId);
+    }
+
+    setSelectedNodeId(null);
+    setPendingEdgeConnectionId(draft.connectionId);
+    setEdgeSaveError(null);
+    setEdgeSaving(false);
+    setEdgeDraft(createDefaultEdgeDraft(draft.sourceNodeId, draft.targetNodeId));
+    applyEditorVisualState();
   };
 
   const handleEdgeSave = async () => {
@@ -1480,7 +1562,9 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
       const payload = await createProjectGraphEdge(props.projectId, draft);
       mutate(payload);
       setSelectedNodeId(null);
-      cancelLinkMode();
+      closeEdgeComposer({
+        removeConnection: false,
+      });
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Could not save the relationship edge.";
@@ -1500,17 +1584,14 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
       setSelectedNodeId(null);
     }
 
-    if (linkSourceNodeId() && !payload.nodes.some((node) => node.id === linkSourceNodeId())) {
-      cancelLinkMode();
-    }
-
     const draft = edgeDraft();
     if (
       draft &&
       (!payload.nodes.some((node) => node.id === draft.sourceNodeId) ||
         !payload.nodes.some((node) => node.id === draft.targetNodeId))
     ) {
-      cancelLinkMode();
+      resetEdgeComposerState();
+      setPendingEdgeConnectionId(null);
     }
   });
 
@@ -1537,8 +1618,6 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
       await handle.fitToView(panelOpen ? GRAPH_PANEL_FIT_SCALE : GRAPH_DEFAULT_FIT_SCALE);
       handle.setVisualState({
         selectedNodeId: selectedNodeId(),
-        linkSourceNodeId: linkSourceNodeId(),
-        linkTargetNodeId: edgeDraft()?.targetNodeId ?? null,
       });
     })();
 
@@ -1599,6 +1678,7 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
           }
         },
         handleNodeActivate,
+        handleConnectionDraft,
       );
 
       if (disposed || currentBuild !== buildToken) {
@@ -1612,8 +1692,6 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
       );
       handle.setVisualState({
         selectedNodeId: untrack(() => selectedNodeId()),
-        linkSourceNodeId: untrack(() => linkSourceNodeId()),
-        linkTargetNodeId: untrack(() => edgeDraft()?.targetNodeId ?? null),
       });
     })();
 
@@ -1632,16 +1710,7 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
         event.preventDefault();
         event.stopPropagation();
         event.stopImmediatePropagation();
-        clearEdgeComposer();
-        applyEditorVisualState();
-        return;
-      }
-
-      if (linkMode()) {
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
-        cancelLinkMode();
+        closeEdgeComposer();
         return;
       }
 
@@ -1675,8 +1744,6 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
         <div ref={containerRef} class="project-home-canvas" />
 
         <GraphControls
-          linkActive={linkMode()}
-          onToggleLink={toggleLinkMode}
           onReorganize={() => void reorganizeGraph()}
           onZoomIn={() => void editorHandle?.zoomBy(1.12)}
           onZoomOut={() => void editorHandle?.zoomBy(0.9)}
@@ -1728,10 +1795,7 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
             saving={edgeSaving()}
             error={edgeSaveError()}
             onChange={(next) => setEdgeDraft(next)}
-            onClose={() => {
-              clearEdgeComposer();
-              applyEditorVisualState();
-            }}
+            onClose={() => closeEdgeComposer()}
             onSubmit={() => void handleEdgeSave()}
           />
         )}
