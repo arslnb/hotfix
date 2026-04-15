@@ -229,6 +229,22 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
+function buildSnappyConnectorPath(
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+) {
+  const minimumChannel = 22;
+  const minimumForwardGap = 54;
+
+  if (end.x >= start.x + minimumForwardGap) {
+    const trunkX = start.x + Math.max(minimumChannel, (end.x - start.x) / 2);
+    return `M ${start.x} ${start.y} L ${trunkX} ${start.y} L ${trunkX} ${end.y} L ${end.x} ${end.y}`;
+  }
+
+  const trunkX = Math.max(start.x, end.x) + minimumChannel;
+  return `M ${start.x} ${start.y} L ${trunkX} ${start.y} L ${trunkX} ${end.y} L ${end.x} ${end.y}`;
+}
+
 function formatMetricCount(value: number | undefined) {
   const count = value ?? 0;
   if (count >= 1_000_000) {
@@ -646,14 +662,11 @@ async function mountProjectGraphEditor(
   render.addPipe((context: any) => {
     if (context.type === "connectionpath") {
       const [start, end] = context.data.points;
-      const sourceLeadX = start.x + 32;
-      const targetLeadX = end.x + 32;
-      const trunkX = Math.max(sourceLeadX, targetLeadX) + 18;
       return {
         ...context,
         data: {
           ...context.data,
-          path: `M ${start.x} ${start.y} L ${sourceLeadX} ${start.y} L ${trunkX} ${start.y} L ${trunkX} ${end.y} L ${targetLeadX} ${end.y} L ${end.x} ${end.y}`,
+          path: buildSnappyConnectorPath(start, end),
         },
       };
     }
