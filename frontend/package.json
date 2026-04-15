@@ -10,6 +10,12 @@
     "preview": "vp preview"
   },
   "dependencies": {
+    "@retejs/lit-plugin": "^2.0.7",
+    "echarts": "^6.0.0",
+    "lit": "^3.3.2",
+    "rete": "^2.0.6",
+    "rete-area-plugin": "^2.1.5",
+    "rete-connection-plugin": "^2.0.5",
     "solid-js": "^1.9.11"
   },
   "devDependencies": {

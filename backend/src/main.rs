@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     env,
     fmt::Display,
     net::SocketAddr,
@@ -27,9 +27,10 @@ use dotenvy::dotenv;
 use rand::random;
 use reqwest::header::{ACCEPT, USER_AGENT};
 use serde::{Deserialize, Serialize};
+use serde_json::{Value as JsonValue, json};
 use sha2::{Digest, Sha256};
-use sqlx::{FromRow, PgConnection, PgPool, postgres::PgPoolOptions};
-use time::OffsetDateTime;
+use sqlx::{FromRow, PgConnection, PgPool, postgres::PgPoolOptions, types::Json as SqlJson};
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tower_http::{
     services::{ServeDir, ServeFile},
     trace::TraceLayer,
@@ -364,7 +365,7 @@ impl Provider {
     fn scope(self) -> &'static str {
         match self {
             Self::GitHub => "read:user user:email read:org repo",
-            Self::Sentry => "org:read project:read",
+            Self::Sentry => "org:read project:read event:read",
         }
     }
 }
@@ -488,6 +489,7 @@ struct ProviderConnectionRow {
     provider: String,
     slug: Option<String>,
     display_name: String,
+    scopes: Option<String>,
     access_token_nonce: Vec<u8>,
     access_token_ciphertext: Vec<u8>,
 }
@@ -520,6 +522,54 @@ struct HotfixProjectPayload {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct HotfixIncidentPayload {
+    id: Uuid,
+    incident_key: String,
+    title: String,
+    status: String,
+    first_seen_at: Option<i64>,
+    last_seen_at: Option<i64>,
+    issue_count: i64,
+    sentry_project_count: i64,
+    sentry_issues: Vec<IncidentSentryIssuePayload>,
+    code_refs: Vec<IncidentCodeRefPayload>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IncidentSentryIssuePayload {
+    id: Uuid,
+    sentry_issue_id: String,
+    short_id: Option<String>,
+    title: String,
+    status: String,
+    level: Option<String>,
+    project_slug: String,
+    project_name: String,
+    permalink: Option<String>,
+    event_count: i64,
+    user_count: i64,
+    first_seen_at: Option<i64>,
+    last_seen_at: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IncidentCodeRefPayload {
+    id: Uuid,
+    github_repo_id: Option<i64>,
+    github_repo_full_name: Option<String>,
+    github_repo_url: Option<String>,
+    path: String,
+    start_line: Option<i32>,
+    end_line: Option<i32>,
+    symbol: Option<String>,
+    confidence: f64,
+    source: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ImportedSentryProjectPayload {
     id: Uuid,
     sentry_project_id: String,
@@ -527,7 +577,50 @@ struct ImportedSentryProjectPayload {
     name: String,
     platform: Option<String>,
     included: bool,
+    errors_24h: i64,
+    transactions_24h: i64,
+    replays_24h: i64,
+    profiles_24h: i64,
+    sentry_repo_connected: bool,
+    hotfix_repo_connected: bool,
     repo_mapping: Option<GitHubRepoMappingPayload>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectGraphPayload {
+    project_id: Uuid,
+    project_slug: String,
+    nodes: Vec<ProjectGraphNodePayload>,
+    edges: Vec<ProjectGraphEdgePayload>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectGraphNodePayload {
+    id: Uuid,
+    imported_sentry_project_id: Option<Uuid>,
+    node_key: String,
+    node_type: String,
+    label: String,
+    description: Option<String>,
+    position_x: f64,
+    position_y: f64,
+    metadata: JsonValue,
+    is_system: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectGraphEdgePayload {
+    id: Uuid,
+    edge_key: String,
+    edge_type: String,
+    source_node_id: Uuid,
+    target_node_id: Uuid,
+    label: Option<String>,
+    metadata: JsonValue,
+    is_system: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -579,6 +672,33 @@ struct UpdateSentryProjectSelectionInput {
     included_project_ids: Vec<Uuid>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateProjectGraphLayoutInput {
+    nodes: Vec<ProjectGraphNodeLayoutInput>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateProjectGraphEdgeInput {
+    source_node_id: Uuid,
+    target_node_id: Uuid,
+    label: String,
+    interaction_type: Option<String>,
+    transport: Option<String>,
+    touchpoints: Option<String>,
+    data_contract: Option<String>,
+    context_not_in_code: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectGraphNodeLayoutInput {
+    id: Uuid,
+    position_x: f64,
+    position_y: f64,
+}
+
 #[derive(Debug, FromRow)]
 struct HotfixProjectRow {
     id: Uuid,
@@ -599,10 +719,149 @@ struct ImportedSentryProjectRow {
     name: String,
     platform: Option<String>,
     included: bool,
+    errors_24h: i64,
+    transactions_24h: i64,
+    replays_24h: i64,
+    profiles_24h: i64,
+    sentry_repo_connected: bool,
     github_repo_id: Option<i64>,
     github_repo_full_name: Option<String>,
     github_repo_url: Option<String>,
     github_repo_default_branch: Option<String>,
+}
+
+#[derive(Debug, FromRow)]
+struct ProjectGraphNodeRow {
+    id: Uuid,
+    imported_sentry_project_id: Option<Uuid>,
+    node_key: String,
+    node_type: String,
+    label: String,
+    description: Option<String>,
+    position_x: f64,
+    position_y: f64,
+    metadata: SqlJson<JsonValue>,
+    is_system: bool,
+}
+
+#[derive(Debug, FromRow)]
+struct ProjectGraphEdgeRow {
+    id: Uuid,
+    edge_key: String,
+    edge_type: String,
+    source_node_id: Uuid,
+    target_node_id: Uuid,
+    label: Option<String>,
+    metadata: SqlJson<JsonValue>,
+    is_system: bool,
+}
+
+#[derive(Debug, FromRow)]
+struct ExistingGraphNodePositionRow {
+    node_key: String,
+    position_x: f64,
+    position_y: f64,
+}
+
+#[derive(Debug, FromRow)]
+struct BackfillImportedProjectRow {
+    id: Uuid,
+    sentry_project_id: String,
+    slug: String,
+    github_repo_id: Option<i64>,
+    github_repo_full_name: Option<String>,
+    github_repo_url: Option<String>,
+}
+
+#[derive(Debug, FromRow)]
+struct HotfixIncidentRow {
+    id: Uuid,
+    incident_key: String,
+    title: String,
+    status: String,
+    first_seen_at: Option<OffsetDateTime>,
+    last_seen_at: Option<OffsetDateTime>,
+    issue_count: i32,
+    sentry_project_count: i32,
+}
+
+#[derive(Debug, FromRow)]
+struct IncidentSentryIssueRow {
+    incident_id: Uuid,
+    snapshot_id: Uuid,
+    sentry_issue_id: String,
+    short_id: Option<String>,
+    title: String,
+    status: String,
+    level: Option<String>,
+    project_slug: String,
+    project_name: String,
+    permalink: Option<String>,
+    event_count: i64,
+    user_count: i64,
+    first_seen_at: Option<OffsetDateTime>,
+    last_seen_at: Option<OffsetDateTime>,
+}
+
+#[derive(Debug, FromRow)]
+struct IncidentCodeRefRow {
+    incident_id: Uuid,
+    id: Uuid,
+    github_repo_id: Option<i64>,
+    github_repo_full_name: Option<String>,
+    github_repo_url: Option<String>,
+    path: String,
+    start_line: Option<i32>,
+    end_line: Option<i32>,
+    symbol: Option<String>,
+    confidence: f64,
+    source: String,
+}
+
+#[derive(Debug, FromRow)]
+struct SentryIssueSnapshotRow {
+    id: Uuid,
+    imported_sentry_project_id: Uuid,
+    title: String,
+    culprit: Option<String>,
+    level: Option<String>,
+    status: String,
+    first_seen_at: Option<OffsetDateTime>,
+    last_seen_at: Option<OffsetDateTime>,
+}
+
+#[derive(Debug, FromRow)]
+struct SentryIssueCodeRefRow {
+    sentry_issue_snapshot_id: Uuid,
+    github_repo_id: Option<i64>,
+    github_repo_full_name: Option<String>,
+    github_repo_url: Option<String>,
+    path: String,
+    start_line: Option<i32>,
+    end_line: Option<i32>,
+    symbol: Option<String>,
+    confidence: f64,
+    source: String,
+    metadata: SqlJson<JsonValue>,
+}
+
+#[derive(Debug, FromRow)]
+struct GraphImportedProjectRow {
+    id: Uuid,
+    sentry_project_id: String,
+    slug: String,
+    name: String,
+    platform: Option<String>,
+    included: bool,
+    errors_24h: i64,
+    transactions_24h: i64,
+    replays_24h: i64,
+    profiles_24h: i64,
+    errors_24h_series: SqlJson<Vec<i64>>,
+    transactions_24h_series: SqlJson<Vec<i64>>,
+    sentry_repo_connected: bool,
+    github_repo_full_name: Option<String>,
+    github_repo_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -614,10 +873,192 @@ struct SentryOrganization {
 
 #[derive(Debug, Deserialize)]
 struct SentryProjectResponse {
+    #[serde(deserialize_with = "deserialize_string_from_string_or_number")]
     id: String,
     slug: String,
     name: String,
     platform: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SentryIssueResponse {
+    #[serde(deserialize_with = "deserialize_string_from_string_or_number")]
+    id: String,
+    short_id: Option<String>,
+    title: String,
+    culprit: Option<String>,
+    level: Option<String>,
+    status: String,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_option_i64_from_string_or_number"
+    )]
+    count: Option<i64>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_option_i64_from_string_or_number"
+    )]
+    user_count: Option<i64>,
+    permalink: Option<String>,
+    first_seen: Option<String>,
+    last_seen: Option<String>,
+    project: Option<SentryIssueProjectResponse>,
+    #[serde(default)]
+    metadata: JsonValue,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SentryIssueProjectResponse {
+    #[serde(deserialize_with = "deserialize_string_from_string_or_number")]
+    id: String,
+    slug: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SentryIssueEventResponse {
+    #[serde(rename = "eventID")]
+    event_id: Option<String>,
+    #[serde(rename = "dateCreated")]
+    date_created: Option<String>,
+    #[serde(default)]
+    tags: Vec<SentryTagResponse>,
+    #[serde(default)]
+    entries: Vec<JsonValue>,
+}
+
+#[derive(Debug, Clone)]
+struct IssueCodeRefCandidate {
+    github_repo_id: Option<i64>,
+    github_repo_full_name: Option<String>,
+    github_repo_url: Option<String>,
+    path: String,
+    start_line: Option<i32>,
+    end_line: Option<i32>,
+    symbol: Option<String>,
+    confidence: f64,
+    source: String,
+    metadata: JsonValue,
+}
+
+#[derive(Debug)]
+struct BackfilledIssue {
+    imported_sentry_project_id: Uuid,
+    issue: SentryIssueResponse,
+    exemplar_event_id: Option<String>,
+    release_name: Option<String>,
+    environment: Option<String>,
+    trace_id: Option<String>,
+    code_refs: Vec<IssueCodeRefCandidate>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SentryRepositoryResponse {
+    name: String,
+}
+
+#[derive(Debug, Default, Clone)]
+struct SentryProjectMetricsSnapshot {
+    errors_24h: i64,
+    transactions_24h: i64,
+    replays_24h: i64,
+    profiles_24h: i64,
+    errors_24h_series: Vec<i64>,
+    transactions_24h_series: Vec<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SentryStatsSummaryResponse {
+    projects: Vec<SentryStatsProjectResponse>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SentryStatsProjectResponse {
+    id: String,
+    stats: Vec<SentryStatsCategoryResponse>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SentryStatsCategoryResponse {
+    category: String,
+    totals: HashMap<String, i64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SentryStatsV2Response {
+    groups: Vec<SentryStatsV2GroupResponse>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SentryStatsV2GroupResponse {
+    by: HashMap<String, String>,
+    series: HashMap<String, Vec<i64>>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportedProjectActivityPayload {
+    imported_project_id: Uuid,
+    project_name: String,
+    errors: Vec<ImportedProjectErrorLogPayload>,
+    transactions: Vec<ImportedProjectTransactionLogPayload>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportedProjectErrorLogPayload {
+    id: String,
+    event_id: Option<String>,
+    title: String,
+    culprit: Option<String>,
+    level: Option<String>,
+    event_type: Option<String>,
+    timestamp: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportedProjectTransactionLogPayload {
+    name: String,
+    count: i64,
+    avg_duration_ms: Option<f64>,
+}
+
+#[derive(Debug, FromRow)]
+struct ImportedProjectActivityRow {
+    name: String,
+    slug: String,
+    sentry_project_id: String,
+    sentry_connection_id: Uuid,
+    sentry_organization_slug: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SentryErrorEventResponse {
+    id: String,
+    #[serde(rename = "eventID")]
+    event_id: Option<String>,
+    #[serde(rename = "dateCreated")]
+    date_created: String,
+    title: Option<String>,
+    culprit: Option<String>,
+    #[serde(default)]
+    tags: Vec<SentryTagResponse>,
+    #[serde(rename = "event.type")]
+    event_type: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SentryTagResponse {
+    key: String,
+    value: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SentryExploreTableResponse {
+    data: Vec<HashMap<String, JsonValue>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -721,6 +1162,30 @@ async fn main() -> Result<(), AppError> {
         .route(
             "/hotfix-projects/{project_id}/refresh-sentry-projects",
             post(refresh_sentry_projects),
+        )
+        .route(
+            "/hotfix-projects/{project_id}/graph",
+            get(get_project_graph),
+        )
+        .route(
+            "/hotfix-projects/{project_id}/graph/edges",
+            post(create_project_graph_edge),
+        )
+        .route(
+            "/hotfix-projects/{project_id}/incidents",
+            get(get_hotfix_project_incidents),
+        )
+        .route(
+            "/hotfix-projects/{project_id}/backfill-incidents",
+            post(backfill_hotfix_project_incidents),
+        )
+        .route(
+            "/hotfix-projects/{project_id}/graph/layout",
+            patch(update_project_graph_layout),
+        )
+        .route(
+            "/imported-sentry-projects/{imported_project_id}/activity",
+            get(get_imported_project_activity),
         )
         .route(
             "/imported-sentry-projects/{imported_project_id}/repo-mapping",
@@ -891,8 +1356,22 @@ async fn assign_sentry_connection(
         AppError::BadRequest("The Sentry connection is missing an organization slug.".into())
     })?;
     let sentry_projects = fetch_all_sentry_projects(&state, &access_token, slug).await?;
+    let sentry_metrics =
+        fetch_sentry_project_metrics(&state, &access_token, slug, &sentry_projects).await?;
+    let sentry_repositories =
+        fetch_sentry_organization_repositories(&state, &access_token, slug).await?;
 
-    sync_imported_sentry_projects(&mut tx, project_id, connection.id, &sentry_projects).await?;
+    sync_imported_sentry_projects(
+        &mut tx,
+        project_id,
+        connection.id,
+        &sentry_projects,
+        &sentry_metrics,
+        &sentry_repositories,
+    )
+    .await?;
+    sync_hotfix_project_graph(&mut tx, project_id).await?;
+    clear_hotfix_incident_data(&mut tx, project_id).await?;
     tx.commit().await?;
 
     let payload = build_single_hotfix_project_payload(&state, user_id, project_id).await?;
@@ -988,6 +1467,8 @@ async fn update_sentry_project_selection(
         .await?;
     }
 
+    sync_hotfix_project_graph(&mut tx, project_id).await?;
+    clear_hotfix_incident_data(&mut tx, project_id).await?;
     tx.commit().await?;
 
     let payload = build_single_hotfix_project_payload(&state, user_id, project_id).await?;
@@ -1015,7 +1496,9 @@ async fn refresh_sentry_projects(
     .await?
     .flatten()
     .ok_or_else(|| {
-        AppError::BadRequest("Connect a Sentry organization before refreshing imported projects.".into())
+        AppError::BadRequest(
+            "Connect a Sentry organization before refreshing imported projects.".into(),
+        )
     })?;
 
     let mut tx = state.db.begin().await?;
@@ -1035,12 +1518,423 @@ async fn refresh_sentry_projects(
     let organization_slug = connection.slug.as_deref().ok_or_else(|| {
         AppError::BadRequest("The Sentry connection is missing an organization slug.".into())
     })?;
-    let sentry_projects = fetch_all_sentry_projects(&state, &access_token, organization_slug).await?;
+    let sentry_projects =
+        fetch_all_sentry_projects(&state, &access_token, organization_slug).await?;
+    let sentry_metrics =
+        fetch_sentry_project_metrics(&state, &access_token, organization_slug, &sentry_projects)
+            .await?;
+    let sentry_repositories =
+        fetch_sentry_organization_repositories(&state, &access_token, organization_slug).await?;
 
-    sync_imported_sentry_projects(&mut tx, project_id, connection.id, &sentry_projects).await?;
+    sync_imported_sentry_projects(
+        &mut tx,
+        project_id,
+        connection.id,
+        &sentry_projects,
+        &sentry_metrics,
+        &sentry_repositories,
+    )
+    .await?;
+    sync_hotfix_project_graph(&mut tx, project_id).await?;
+    clear_hotfix_incident_data(&mut tx, project_id).await?;
     tx.commit().await?;
 
     let payload = build_single_hotfix_project_payload(&state, user_id, project_id).await?;
+    Ok(Json(payload))
+}
+
+async fn get_project_graph(
+    State(state): State<AppState>,
+    session: Session,
+    AxumPath(project_id): AxumPath<Uuid>,
+) -> Result<Json<ProjectGraphPayload>, AppError> {
+    let user_id = require_user_id(&session).await?;
+    ensure_hotfix_project_owner(&state.db, user_id, project_id).await?;
+
+    let mut tx = state.db.begin().await?;
+    sync_hotfix_project_graph(&mut tx, project_id).await?;
+    tx.commit().await?;
+
+    let payload = build_project_graph_payload(&state.db, project_id).await?;
+    Ok(Json(payload))
+}
+
+async fn get_hotfix_project_incidents(
+    State(state): State<AppState>,
+    session: Session,
+    AxumPath(project_id): AxumPath<Uuid>,
+) -> Result<Json<Vec<HotfixIncidentPayload>>, AppError> {
+    let user_id = require_user_id(&session).await?;
+    ensure_hotfix_project_owner(&state.db, user_id, project_id).await?;
+    let payload = build_hotfix_incident_payloads(&state.db, project_id).await?;
+    Ok(Json(payload))
+}
+
+async fn backfill_hotfix_project_incidents(
+    State(state): State<AppState>,
+    session: Session,
+    AxumPath(project_id): AxumPath<Uuid>,
+) -> Result<Json<Vec<HotfixIncidentPayload>>, AppError> {
+    let user_id = require_user_id(&session).await?;
+    ensure_hotfix_project_owner(&state.db, user_id, project_id).await?;
+
+    let (sentry_connection_id, last_incident_backfill_at) =
+        sqlx::query_as::<_, (Option<Uuid>, Option<OffsetDateTime>)>(
+            r#"
+        select sentry_connection_id, last_incident_backfill_at
+        from hotfix_projects
+        where id = $1 and user_id = $2
+        "#,
+        )
+        .bind(project_id)
+        .bind(user_id)
+        .fetch_one(&state.db)
+        .await?;
+    let sentry_connection_id = sentry_connection_id.ok_or_else(|| {
+        AppError::BadRequest("Connect a Sentry organization before backfilling incidents.".into())
+    })?;
+
+    let imported_projects = sqlx::query_as::<_, BackfillImportedProjectRow>(
+        r#"
+        select
+            imported_sentry_projects.id,
+            imported_sentry_projects.sentry_project_id,
+            imported_sentry_projects.slug,
+            sentry_project_repo_mappings.github_repo_id,
+            sentry_project_repo_mappings.github_repo_full_name,
+            sentry_project_repo_mappings.github_repo_url
+        from imported_sentry_projects
+        left join sentry_project_repo_mappings
+            on sentry_project_repo_mappings.imported_sentry_project_id = imported_sentry_projects.id
+        where imported_sentry_projects.hotfix_project_id = $1
+          and imported_sentry_projects.included = true
+        order by imported_sentry_projects.name asc
+        "#,
+    )
+    .bind(project_id)
+    .fetch_all(&state.db)
+    .await?;
+
+    if imported_projects.is_empty() {
+        let mut tx = state.db.begin().await?;
+        clear_hotfix_incident_data(&mut tx, project_id).await?;
+        tx.commit().await?;
+        return Ok(Json(Vec::new()));
+    }
+
+    let mut tx = state.db.begin().await?;
+    let connection =
+        load_provider_connection_with_executor(&mut tx, user_id, sentry_connection_id).await?;
+    tx.commit().await?;
+
+    if !has_scope(connection.scopes.as_deref(), "event:read") {
+        return Err(AppError::BadRequest(
+            "Reconnect Sentry to grant Hotfix access to issues and events, then run the backfill again."
+                .into(),
+        ));
+    }
+
+    let organization_slug = connection.slug.clone().ok_or_else(|| {
+        AppError::BadRequest("The Sentry connection is missing an organization slug.".into())
+    })?;
+    let access_token = decrypt_provider_token(
+        &state.config.session_secret,
+        &connection.access_token_nonce,
+        &connection.access_token_ciphertext,
+    )?;
+
+    let issues = fetch_sentry_organization_issues(
+        &state,
+        &access_token,
+        &organization_slug,
+        &imported_projects,
+        last_incident_backfill_at,
+    )
+    .await?;
+    let backfilled_issues = backfill_sentry_issue_snapshots(
+        &state,
+        &access_token,
+        &organization_slug,
+        &imported_projects,
+        issues,
+    )
+    .await?;
+
+    let mut tx = state.db.begin().await?;
+    persist_backfilled_issues(
+        &mut tx,
+        project_id,
+        &backfilled_issues,
+        last_incident_backfill_at.is_none(),
+    )
+    .await?;
+    rebuild_hotfix_incidents(&mut tx, project_id).await?;
+    sqlx::query(
+        r#"
+        update hotfix_projects
+        set last_incident_backfill_at = now(), updated_at = now()
+        where id = $1
+        "#,
+    )
+    .bind(project_id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    let payload = build_hotfix_incident_payloads(&state.db, project_id).await?;
+    Ok(Json(payload))
+}
+
+async fn get_imported_project_activity(
+    State(state): State<AppState>,
+    session: Session,
+    AxumPath(imported_project_id): AxumPath<Uuid>,
+) -> Result<Json<ImportedProjectActivityPayload>, AppError> {
+    let user_id = require_user_id(&session).await?;
+    load_imported_project_owner(&state.db, user_id, imported_project_id).await?;
+
+    let imported_project = sqlx::query_as::<_, ImportedProjectActivityRow>(
+        r#"
+        select
+            imported_sentry_projects.name,
+            imported_sentry_projects.slug,
+            imported_sentry_projects.sentry_project_id,
+            imported_sentry_projects.sentry_connection_id,
+            provider_connections.slug as sentry_organization_slug
+        from imported_sentry_projects
+        join provider_connections
+            on provider_connections.id = imported_sentry_projects.sentry_connection_id
+        join hotfix_projects
+            on hotfix_projects.id = imported_sentry_projects.hotfix_project_id
+        where imported_sentry_projects.id = $1
+          and hotfix_projects.user_id = $2
+        "#,
+    )
+    .bind(imported_project_id)
+    .bind(user_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| {
+        AppError::NotFound("The requested Sentry project import was not found.".into())
+    })?;
+
+    let mut tx = state.db.begin().await?;
+    let connection = load_provider_connection_with_executor(
+        &mut tx,
+        user_id,
+        imported_project.sentry_connection_id,
+    )
+    .await?;
+    tx.commit().await?;
+
+    let access_token = decrypt_provider_token(
+        &state.config.session_secret,
+        &connection.access_token_nonce,
+        &connection.access_token_ciphertext,
+    )?;
+
+    let errors = fetch_sentry_project_error_events(
+        &state,
+        &access_token,
+        &imported_project.sentry_organization_slug,
+        &imported_project.slug,
+    )
+    .await?;
+
+    let transactions = match fetch_sentry_project_transaction_activity(
+        &state,
+        &access_token,
+        &imported_project.sentry_organization_slug,
+        &imported_project.sentry_project_id,
+    )
+    .await
+    {
+        Ok(items) => items,
+        Err(error) => {
+            warn!(?error, "sentry transaction activity lookup failed");
+            Vec::new()
+        }
+    };
+
+    Ok(Json(ImportedProjectActivityPayload {
+        imported_project_id,
+        project_name: imported_project.name,
+        errors,
+        transactions,
+    }))
+}
+
+async fn update_project_graph_layout(
+    State(state): State<AppState>,
+    session: Session,
+    AxumPath(project_id): AxumPath<Uuid>,
+    Json(input): Json<UpdateProjectGraphLayoutInput>,
+) -> Result<StatusCode, AppError> {
+    let user_id = require_user_id(&session).await?;
+    ensure_hotfix_project_owner(&state.db, user_id, project_id).await?;
+
+    if input.nodes.is_empty() {
+        return Ok(StatusCode::NO_CONTENT);
+    }
+
+    let existing_ids = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        select id
+        from hotfix_project_graph_nodes
+        where hotfix_project_id = $1
+        "#,
+    )
+    .bind(project_id)
+    .fetch_all(&state.db)
+    .await?;
+
+    let existing_set = existing_ids.into_iter().collect::<HashSet<_>>();
+    for node in &input.nodes {
+        if !existing_set.contains(&node.id) {
+            return Err(AppError::BadRequest(
+                "One or more graph nodes do not belong to this Hotfix project.".into(),
+            ));
+        }
+    }
+
+    let mut tx = state.db.begin().await?;
+    for node in &input.nodes {
+        sqlx::query(
+            r#"
+            update hotfix_project_graph_nodes
+            set position_x = $1, position_y = $2, updated_at = now()
+            where hotfix_project_id = $3 and id = $4
+            "#,
+        )
+        .bind(node.position_x)
+        .bind(node.position_y)
+        .bind(project_id)
+        .bind(node.id)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn create_project_graph_edge(
+    State(state): State<AppState>,
+    session: Session,
+    AxumPath(project_id): AxumPath<Uuid>,
+    Json(input): Json<CreateProjectGraphEdgeInput>,
+) -> Result<Json<ProjectGraphPayload>, AppError> {
+    let user_id = require_user_id(&session).await?;
+    ensure_hotfix_project_owner(&state.db, user_id, project_id).await?;
+
+    if input.source_node_id == input.target_node_id {
+        return Err(AppError::BadRequest(
+            "Choose two different nodes to create a relationship.".into(),
+        ));
+    }
+
+    let label = required_text_field(
+        &input.label,
+        "Describe how these projects interact before saving the edge.",
+    )?;
+    let interaction_type = optional_text_field(input.interaction_type.as_deref());
+    let transport = optional_text_field(input.transport.as_deref());
+    let touchpoints = optional_text_field(input.touchpoints.as_deref());
+    let data_contract = optional_text_field(input.data_contract.as_deref());
+    let context_not_in_code = optional_text_field(input.context_not_in_code.as_deref());
+
+    let node_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        select count(*)
+        from hotfix_project_graph_nodes
+        where hotfix_project_id = $1
+          and id = any($2)
+        "#,
+    )
+    .bind(project_id)
+    .bind(vec![input.source_node_id, input.target_node_id])
+    .fetch_one(&state.db)
+    .await?;
+
+    if node_count != 2 {
+        return Err(AppError::BadRequest(
+            "One or both graph nodes are no longer available on this project.".into(),
+        ));
+    }
+
+    let edge_metadata = json!({
+        "summary": label,
+        "interactionType": interaction_type,
+        "transport": transport,
+        "touchpoints": touchpoints,
+        "dataContract": data_contract,
+        "contextNotInCode": context_not_in_code
+    });
+
+    let mut tx = state.db.begin().await?;
+    let existing_edge_id = sqlx::query_scalar::<_, Option<Uuid>>(
+        r#"
+        select id
+        from hotfix_project_graph_edges
+        where hotfix_project_id = $1
+          and source_node_id = $2
+          and target_node_id = $3
+          and edge_type = 'relationship'
+          and is_system = false
+        limit 1
+        "#,
+    )
+    .bind(project_id)
+    .bind(input.source_node_id)
+    .bind(input.target_node_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .flatten();
+
+    if let Some(edge_id) = existing_edge_id {
+        sqlx::query(
+            r#"
+            update hotfix_project_graph_edges
+            set label = $1, metadata = $2, updated_at = now()
+            where id = $3 and hotfix_project_id = $4
+            "#,
+        )
+        .bind(&label)
+        .bind(SqlJson(edge_metadata))
+        .bind(edge_id)
+        .bind(project_id)
+        .execute(&mut *tx)
+        .await?;
+    } else {
+        sqlx::query(
+            r#"
+            insert into hotfix_project_graph_edges (
+                id,
+                hotfix_project_id,
+                edge_key,
+                edge_type,
+                source_node_id,
+                target_node_id,
+                label,
+                metadata,
+                is_system
+            )
+            values ($1, $2, $3, 'relationship', $4, $5, $6, $7, false)
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(project_id)
+        .bind(format!("relationship:{}", Uuid::new_v4()))
+        .bind(input.source_node_id)
+        .bind(input.target_node_id)
+        .bind(&label)
+        .bind(SqlJson(edge_metadata))
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+    let payload = build_project_graph_payload(&state.db, project_id).await?;
     Ok(Json(payload))
 }
 
@@ -1078,6 +1972,7 @@ async fn update_repo_mapping(
 
     let mut tx = state.db.begin().await?;
     if let Some(repo) = selected_repo {
+        let repo_full_name = repo.full_name.clone();
         sqlx::query(
             r#"
             insert into sentry_project_repo_mappings (
@@ -1101,9 +1996,50 @@ async fn update_repo_mapping(
         .bind(Uuid::new_v4())
         .bind(imported_project_id)
         .bind(repo.id)
-        .bind(repo.full_name)
+        .bind(&repo_full_name)
         .bind(repo.html_url)
         .bind(repo.default_branch.as_deref())
+        .execute(&mut *tx)
+        .await?;
+
+        let sentry_connection = sqlx::query_as::<_, (Option<Uuid>, Option<String>)>(
+            r#"
+            select hotfix_projects.sentry_connection_id, provider_connections.slug
+            from imported_sentry_projects
+            join hotfix_projects on hotfix_projects.id = imported_sentry_projects.hotfix_project_id
+            left join provider_connections on provider_connections.id = hotfix_projects.sentry_connection_id
+            where imported_sentry_projects.id = $1
+            "#,
+        )
+        .bind(imported_project_id)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        let sentry_repo_connected = match sentry_connection {
+            (Some(connection_id), Some(slug)) => {
+                let connection =
+                    load_provider_connection_with_executor(&mut tx, user_id, connection_id).await?;
+                let access_token = decrypt_provider_token(
+                    &state.config.session_secret,
+                    &connection.access_token_nonce,
+                    &connection.access_token_ciphertext,
+                )?;
+                let repos =
+                    fetch_sentry_organization_repositories(&state, &access_token, &slug).await?;
+                repos.contains(&repo_full_name.to_lowercase())
+            }
+            _ => false,
+        };
+
+        sqlx::query(
+            r#"
+            update imported_sentry_projects
+            set sentry_repo_connected = $1, updated_at = now()
+            where id = $2
+            "#,
+        )
+        .bind(sentry_repo_connected)
+        .bind(imported_project_id)
         .execute(&mut *tx)
         .await?;
     } else {
@@ -1116,8 +2052,20 @@ async fn update_repo_mapping(
         .bind(imported_project_id)
         .execute(&mut *tx)
         .await?;
+
+        sqlx::query(
+            r#"
+            update imported_sentry_projects
+            set sentry_repo_connected = false, updated_at = now()
+            where id = $1
+            "#,
+        )
+        .bind(imported_project_id)
+        .execute(&mut *tx)
+        .await?;
     }
 
+    sync_hotfix_project_graph(&mut tx, owner_project_id).await?;
     tx.commit().await?;
     let payload = build_single_hotfix_project_payload(&state, user_id, owner_project_id).await?;
     Ok(Json(payload))
@@ -1874,6 +2822,11 @@ async fn build_dashboard_payload(
                 imported_sentry_projects.name,
                 imported_sentry_projects.platform,
                 imported_sentry_projects.included,
+                imported_sentry_projects.errors_24h,
+                imported_sentry_projects.transactions_24h,
+                imported_sentry_projects.replays_24h,
+                imported_sentry_projects.profiles_24h,
+                imported_sentry_projects.sentry_repo_connected,
                 sentry_project_repo_mappings.github_repo_id,
                 sentry_project_repo_mappings.github_repo_full_name,
                 sentry_project_repo_mappings.github_repo_url,
@@ -1916,6 +2869,12 @@ async fn build_dashboard_payload(
                     name: row.name.clone(),
                     platform: row.platform.clone(),
                     included: row.included,
+                    errors_24h: row.errors_24h,
+                    transactions_24h: row.transactions_24h,
+                    replays_24h: row.replays_24h,
+                    profiles_24h: row.profiles_24h,
+                    sentry_repo_connected: row.sentry_repo_connected,
+                    hotfix_repo_connected: row.github_repo_id.is_some(),
                     repo_mapping: row.github_repo_id.map(|repo_id| GitHubRepoMappingPayload {
                         repo_id,
                         full_name: row.github_repo_full_name.clone().unwrap_or_default(),
@@ -1953,6 +2912,244 @@ async fn build_single_hotfix_project_payload(
         .into_iter()
         .find(|project| project.id == project_id)
         .ok_or_else(|| AppError::NotFound("The requested Hotfix project was not found.".into()))
+}
+
+async fn build_project_graph_payload(
+    db: &PgPool,
+    project_id: Uuid,
+) -> Result<ProjectGraphPayload, AppError> {
+    let (_, project_slug) = sqlx::query_as::<_, (Uuid, String)>(
+        r#"
+        select id, slug
+        from hotfix_projects
+        where id = $1
+        "#,
+    )
+    .bind(project_id)
+    .fetch_optional(db)
+    .await?
+    .ok_or_else(|| AppError::NotFound("The requested Hotfix project was not found.".into()))?;
+
+    let node_rows = sqlx::query_as::<_, ProjectGraphNodeRow>(
+        r#"
+        select
+            id,
+            imported_sentry_project_id,
+            node_key,
+            node_type,
+            label,
+            description,
+            position_x,
+            position_y,
+            metadata,
+            is_system
+        from hotfix_project_graph_nodes
+        where hotfix_project_id = $1
+        order by
+            case when node_type = 'sentry-org' then 0 else 1 end,
+            label asc
+        "#,
+    )
+    .bind(project_id)
+    .fetch_all(db)
+    .await?;
+
+    let edge_rows = sqlx::query_as::<_, ProjectGraphEdgeRow>(
+        r#"
+        select
+            id,
+            edge_key,
+            edge_type,
+            source_node_id,
+            target_node_id,
+            label,
+            metadata,
+            is_system
+        from hotfix_project_graph_edges
+        where hotfix_project_id = $1
+        order by edge_key asc
+        "#,
+    )
+    .bind(project_id)
+    .fetch_all(db)
+    .await?;
+
+    Ok(ProjectGraphPayload {
+        project_id,
+        project_slug,
+        nodes: node_rows
+            .into_iter()
+            .map(|row| ProjectGraphNodePayload {
+                id: row.id,
+                imported_sentry_project_id: row.imported_sentry_project_id,
+                node_key: row.node_key,
+                node_type: row.node_type,
+                label: row.label,
+                description: row.description,
+                position_x: row.position_x,
+                position_y: row.position_y,
+                metadata: row.metadata.0,
+                is_system: row.is_system,
+            })
+            .collect(),
+        edges: edge_rows
+            .into_iter()
+            .map(|row| ProjectGraphEdgePayload {
+                id: row.id,
+                edge_key: row.edge_key,
+                edge_type: row.edge_type,
+                source_node_id: row.source_node_id,
+                target_node_id: row.target_node_id,
+                label: row.label,
+                metadata: row.metadata.0,
+                is_system: row.is_system,
+            })
+            .collect(),
+    })
+}
+
+async fn build_hotfix_incident_payloads(
+    db: &PgPool,
+    project_id: Uuid,
+) -> Result<Vec<HotfixIncidentPayload>, AppError> {
+    let incident_rows = sqlx::query_as::<_, HotfixIncidentRow>(
+        r#"
+        select
+            id,
+            incident_key,
+            title,
+            status,
+            first_seen_at,
+            last_seen_at,
+            issue_count,
+            sentry_project_count
+        from hotfix_incidents
+        where hotfix_project_id = $1
+        order by last_seen_at desc nulls last, created_at desc
+        "#,
+    )
+    .bind(project_id)
+    .fetch_all(db)
+    .await?;
+
+    if incident_rows.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let incident_ids = incident_rows
+        .iter()
+        .map(|incident| incident.id)
+        .collect::<Vec<_>>();
+
+    let sentry_issue_rows = sqlx::query_as::<_, IncidentSentryIssueRow>(
+        r#"
+        select
+            incident_sentry_issues.incident_id,
+            sentry_issue_snapshots.id as snapshot_id,
+            sentry_issue_snapshots.sentry_issue_id,
+            sentry_issue_snapshots.short_id,
+            sentry_issue_snapshots.title,
+            sentry_issue_snapshots.status,
+            sentry_issue_snapshots.level,
+            imported_sentry_projects.slug as project_slug,
+            imported_sentry_projects.name as project_name,
+            sentry_issue_snapshots.permalink,
+            sentry_issue_snapshots.event_count,
+            sentry_issue_snapshots.user_count,
+            sentry_issue_snapshots.first_seen_at,
+            sentry_issue_snapshots.last_seen_at
+        from incident_sentry_issues
+        join sentry_issue_snapshots
+            on sentry_issue_snapshots.id = incident_sentry_issues.sentry_issue_snapshot_id
+        join imported_sentry_projects
+            on imported_sentry_projects.id = sentry_issue_snapshots.imported_sentry_project_id
+        where incident_sentry_issues.incident_id = any($1)
+        order by sentry_issue_snapshots.last_seen_at desc nulls last, sentry_issue_snapshots.title asc
+        "#,
+    )
+    .bind(&incident_ids)
+    .fetch_all(db)
+    .await?;
+
+    let code_ref_rows = sqlx::query_as::<_, IncidentCodeRefRow>(
+        r#"
+        select
+            incident_id,
+            id,
+            github_repo_id,
+            github_repo_full_name,
+            github_repo_url,
+            path,
+            start_line,
+            end_line,
+            symbol,
+            confidence,
+            source
+        from incident_code_refs
+        where incident_id = any($1)
+        order by confidence desc, path asc, start_line asc nulls last
+        "#,
+    )
+    .bind(&incident_ids)
+    .fetch_all(db)
+    .await?;
+
+    let mut issues_by_incident = HashMap::<Uuid, Vec<IncidentSentryIssuePayload>>::new();
+    for row in sentry_issue_rows {
+        issues_by_incident
+            .entry(row.incident_id)
+            .or_default()
+            .push(IncidentSentryIssuePayload {
+                id: row.snapshot_id,
+                sentry_issue_id: row.sentry_issue_id,
+                short_id: row.short_id,
+                title: row.title,
+                status: row.status,
+                level: row.level,
+                project_slug: row.project_slug,
+                project_name: row.project_name,
+                permalink: row.permalink,
+                event_count: row.event_count,
+                user_count: row.user_count,
+                first_seen_at: timestamp_millis(row.first_seen_at),
+                last_seen_at: timestamp_millis(row.last_seen_at),
+            });
+    }
+
+    let mut code_refs_by_incident = HashMap::<Uuid, Vec<IncidentCodeRefPayload>>::new();
+    for row in code_ref_rows {
+        code_refs_by_incident
+            .entry(row.incident_id)
+            .or_default()
+            .push(IncidentCodeRefPayload {
+                id: row.id,
+                github_repo_id: row.github_repo_id,
+                github_repo_full_name: row.github_repo_full_name,
+                github_repo_url: row.github_repo_url,
+                path: row.path,
+                start_line: row.start_line,
+                end_line: row.end_line,
+                symbol: row.symbol,
+                confidence: row.confidence,
+                source: row.source,
+            });
+    }
+
+    Ok(incident_rows
+        .into_iter()
+        .map(|row| HotfixIncidentPayload {
+            id: row.id,
+            incident_key: row.incident_key,
+            title: row.title,
+            status: row.status,
+            first_seen_at: timestamp_millis(row.first_seen_at),
+            last_seen_at: timestamp_millis(row.last_seen_at),
+            issue_count: row.issue_count as i64,
+            sentry_project_count: row.sentry_project_count as i64,
+            sentry_issues: issues_by_incident.remove(&row.id).unwrap_or_default(),
+            code_refs: code_refs_by_incident.remove(&row.id).unwrap_or_default(),
+        })
+        .collect())
 }
 
 async fn ensure_hotfix_project_owner(
@@ -2105,16 +3302,856 @@ async fn fetch_all_sentry_projects(
     Ok(projects)
 }
 
+async fn fetch_sentry_organization_repositories(
+    state: &AppState,
+    access_token: &str,
+    organization_slug: &str,
+) -> Result<HashSet<String>, AppError> {
+    let mut cursor: Option<String> = None;
+    let mut repositories = HashSet::new();
+
+    loop {
+        let mut url = Url::parse(&format!(
+            "https://sentry.io/api/0/organizations/{organization_slug}/repos/"
+        ))
+        .map_err(|_| AppError::Internal)?;
+        if let Some(next_cursor) = cursor.as_deref() {
+            url.query_pairs_mut().append_pair("cursor", next_cursor);
+        }
+
+        let response = state.http.get(url).bearer_auth(access_token).send().await?;
+        if !response.status().is_success() {
+            let body = response.text().await.unwrap_or_default();
+            warn!(body, "sentry repository lookup failed");
+            return Err(AppError::BadRequest(
+                "Could not load the organization repositories from Sentry.".into(),
+            ));
+        }
+
+        let next_cursor = parse_sentry_next_cursor(
+            response
+                .headers()
+                .get("link")
+                .and_then(|value| value.to_str().ok()),
+        );
+        let page = response.json::<Vec<SentryRepositoryResponse>>().await?;
+        repositories.extend(page.into_iter().map(|repo| repo.name.to_lowercase()));
+
+        match next_cursor {
+            Some(next) => cursor = Some(next),
+            None => break,
+        }
+    }
+
+    Ok(repositories)
+}
+
+async fn fetch_sentry_project_metrics(
+    state: &AppState,
+    access_token: &str,
+    organization_slug: &str,
+    projects: &[SentryProjectResponse],
+) -> Result<HashMap<String, SentryProjectMetricsSnapshot>, AppError> {
+    if projects.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let mut url = Url::parse(&format!(
+        "https://sentry.io/api/0/organizations/{organization_slug}/stats-summary/"
+    ))
+    .map_err(|_| AppError::Internal)?;
+    {
+        let mut query = url.query_pairs_mut();
+        query.append_pair("field", "sum(quantity)");
+        query.append_pair("statsPeriod", "24h");
+        query.append_pair("category", "error");
+        query.append_pair("category", "transaction");
+
+        for project in projects {
+            query.append_pair("project", &project.id);
+        }
+    }
+
+    let response = state.http.get(url).bearer_auth(access_token).send().await?;
+    if !response.status().is_success() {
+        let body = response.text().await.unwrap_or_default();
+        warn!(body, "sentry project metrics lookup failed");
+        return Err(AppError::BadRequest(
+            "Could not load the 24h Sentry project metrics.".into(),
+        ));
+    }
+
+    let summary = response.json::<SentryStatsSummaryResponse>().await?;
+    let mut metrics = summary
+        .projects
+        .into_iter()
+        .map(|project| {
+            let mut snapshot = SentryProjectMetricsSnapshot::default();
+
+            for stat in project.stats {
+                let count = stat.totals.get("sum(quantity)").copied().unwrap_or(0);
+                match stat.category.as_str() {
+                    "error" => snapshot.errors_24h = count,
+                    "transaction" => snapshot.transactions_24h = count,
+                    "replay" | "replays" => snapshot.replays_24h = count,
+                    "profile" | "profiles" => snapshot.profiles_24h = count,
+                    _ => {}
+                }
+            }
+
+            (project.id, snapshot)
+        })
+        .collect::<HashMap<_, _>>();
+
+    for project in projects {
+        let (errors_24h_series, transactions_24h_series) =
+            fetch_sentry_project_metric_series(state, access_token, organization_slug, &project.id)
+                .await?;
+        let snapshot = metrics.entry(project.id.clone()).or_default();
+        snapshot.errors_24h_series = errors_24h_series;
+        snapshot.transactions_24h_series = transactions_24h_series;
+    }
+
+    Ok(metrics)
+}
+
+async fn fetch_sentry_project_metric_series(
+    state: &AppState,
+    access_token: &str,
+    organization_slug: &str,
+    sentry_project_id: &str,
+) -> Result<(Vec<i64>, Vec<i64>), AppError> {
+    let mut url = Url::parse(&format!(
+        "https://sentry.io/api/0/organizations/{organization_slug}/stats_v2/"
+    ))
+    .map_err(|_| AppError::Internal)?;
+    {
+        let mut query = url.query_pairs_mut();
+        query.append_pair("field", "sum(quantity)");
+        query.append_pair("statsPeriod", "24h");
+        query.append_pair("interval", "2h");
+        query.append_pair("groupBy", "category");
+        query.append_pair("category", "error");
+        query.append_pair("category", "transaction");
+        query.append_pair("project", sentry_project_id);
+    }
+
+    let response = state.http.get(url).bearer_auth(access_token).send().await?;
+    if !response.status().is_success() {
+        let body = response.text().await.unwrap_or_default();
+        warn!(body, "sentry project metric series lookup failed");
+        return Err(AppError::BadRequest(
+            "Could not load the 24h Sentry project chart data.".into(),
+        ));
+    }
+
+    let payload = response.json::<SentryStatsV2Response>().await?;
+    let mut errors_24h_series = Vec::new();
+    let mut transactions_24h_series = Vec::new();
+
+    for group in payload.groups {
+        let category = group.by.get("category").map(|value| value.as_str());
+        let series = group
+            .series
+            .get("sum(quantity)")
+            .cloned()
+            .unwrap_or_default();
+
+        match category {
+            Some("error") => errors_24h_series = series,
+            Some("transaction") => transactions_24h_series = series,
+            _ => {}
+        }
+    }
+
+    Ok((errors_24h_series, transactions_24h_series))
+}
+
+async fn fetch_sentry_project_error_events(
+    state: &AppState,
+    access_token: &str,
+    organization_slug: &str,
+    project_slug: &str,
+) -> Result<Vec<ImportedProjectErrorLogPayload>, AppError> {
+    let mut url = Url::parse(&format!(
+        "https://sentry.io/api/0/projects/{organization_slug}/{project_slug}/events/"
+    ))
+    .map_err(|_| AppError::Internal)?;
+    {
+        let mut query = url.query_pairs_mut();
+        query.append_pair("statsPeriod", "24h");
+        query.append_pair("per_page", "40");
+    }
+
+    let response = state.http.get(url).bearer_auth(access_token).send().await?;
+    if !response.status().is_success() {
+        let body = response.text().await.unwrap_or_default();
+        warn!(body, "sentry project event lookup failed");
+        return Err(AppError::BadRequest(
+            "Could not load recent Sentry events for this project.".into(),
+        ));
+    }
+
+    let events = response.json::<Vec<SentryErrorEventResponse>>().await?;
+    Ok(events
+        .into_iter()
+        .map(|event| ImportedProjectErrorLogPayload {
+            id: event.id,
+            event_id: event.event_id,
+            title: event.title.unwrap_or_else(|| "Untitled event".to_string()),
+            culprit: event.culprit,
+            level: event
+                .tags
+                .iter()
+                .find(|tag| tag.key == "level")
+                .map(|tag| tag.value.clone()),
+            event_type: event.event_type,
+            timestamp: event.date_created,
+        })
+        .collect())
+}
+
+async fn fetch_sentry_project_transaction_activity(
+    state: &AppState,
+    access_token: &str,
+    organization_slug: &str,
+    sentry_project_id: &str,
+) -> Result<Vec<ImportedProjectTransactionLogPayload>, AppError> {
+    let mut url = Url::parse(&format!(
+        "https://sentry.io/api/0/organizations/{organization_slug}/events/"
+    ))
+    .map_err(|_| AppError::Internal)?;
+    {
+        let mut query = url.query_pairs_mut();
+        query.append_pair("dataset", "spans");
+        query.append_pair("statsPeriod", "24h");
+        query.append_pair("project", sentry_project_id);
+        query.append_pair("per_page", "30");
+        query.append_pair("sort", "-count()");
+        query.append_pair("field", "transaction");
+        query.append_pair("field", "count()");
+        query.append_pair("field", "avg(span.duration)");
+        query.append_pair("query", "transaction:*");
+    }
+
+    let response = state.http.get(url).bearer_auth(access_token).send().await?;
+    if !response.status().is_success() {
+        let body = response.text().await.unwrap_or_default();
+        warn!(body, "sentry transaction activity lookup failed");
+        return Err(AppError::BadRequest(
+            "Could not load recent Sentry transaction activity for this project.".into(),
+        ));
+    }
+
+    let payload = response.json::<SentryExploreTableResponse>().await?;
+    Ok(payload
+        .data
+        .into_iter()
+        .filter_map(|row| {
+            let name = json_string(&row, "transaction")?;
+            let count = json_i64(&row, "count()").unwrap_or(0);
+            let avg_duration_ms = json_f64(&row, "avg(span.duration)");
+
+            Some(ImportedProjectTransactionLogPayload {
+                name,
+                count,
+                avg_duration_ms,
+            })
+        })
+        .collect())
+}
+
+async fn fetch_sentry_organization_issues(
+    state: &AppState,
+    access_token: &str,
+    organization_slug: &str,
+    imported_projects: &[BackfillImportedProjectRow],
+    since: Option<OffsetDateTime>,
+) -> Result<Vec<SentryIssueResponse>, AppError> {
+    let mut cursor: Option<String> = None;
+    let mut issues = Vec::new();
+    let start = since.map(incremental_issue_sync_start);
+
+    loop {
+        let mut url = Url::parse(&format!(
+            "https://sentry.io/api/0/organizations/{organization_slug}/issues/"
+        ))
+        .map_err(|_| AppError::Internal)?;
+        {
+            let mut query = url.query_pairs_mut();
+            query.append_pair("per_page", "100");
+            query.append_pair("query", "is:unresolved");
+            if let Some(start_at) = start.as_deref() {
+                query.append_pair("start", start_at);
+            } else {
+                query.append_pair("statsPeriod", "14d");
+            }
+            if let Some(next_cursor) = cursor.as_deref() {
+                query.append_pair("cursor", next_cursor);
+            }
+            for project in imported_projects {
+                query.append_pair("project", &project.sentry_project_id);
+            }
+        }
+
+        let response = state.http.get(url).bearer_auth(access_token).send().await?;
+        if !response.status().is_success() {
+            let body = response.text().await.unwrap_or_default();
+            warn!(body, "sentry issue list lookup failed");
+            return Err(AppError::BadRequest(
+                "Could not load Sentry issues. Reconnect Sentry with issue/event access.".into(),
+            ));
+        }
+
+        let next_cursor = parse_sentry_next_cursor(
+            response
+                .headers()
+                .get("link")
+                .and_then(|value| value.to_str().ok()),
+        );
+        let page_issues = response.json::<Vec<SentryIssueResponse>>().await?;
+        issues.extend(page_issues);
+
+        match next_cursor {
+            Some(next) => cursor = Some(next),
+            None => break,
+        }
+    }
+
+    Ok(issues)
+}
+
+async fn fetch_sentry_issue_exemplar_event(
+    state: &AppState,
+    access_token: &str,
+    organization_slug: &str,
+    sentry_issue_id: &str,
+) -> Result<Option<SentryIssueEventResponse>, AppError> {
+    let mut url = Url::parse(&format!(
+        "https://sentry.io/api/0/organizations/{organization_slug}/issues/{sentry_issue_id}/events/"
+    ))
+    .map_err(|_| AppError::Internal)?;
+    {
+        let mut query = url.query_pairs_mut();
+        query.append_pair("statsPeriod", "14d");
+        query.append_pair("full", "true");
+        query.append_pair("sample", "true");
+        query.append_pair("per_page", "1");
+    }
+
+    let response = state.http.get(url).bearer_auth(access_token).send().await?;
+    if !response.status().is_success() {
+        let body = response.text().await.unwrap_or_default();
+        warn!(body, "sentry issue exemplar lookup failed");
+        return Err(AppError::BadRequest(
+            "Could not load the issue exemplar event from Sentry.".into(),
+        ));
+    }
+
+    let mut events = response.json::<Vec<SentryIssueEventResponse>>().await?;
+    Ok(events.pop())
+}
+
+async fn backfill_sentry_issue_snapshots(
+    state: &AppState,
+    access_token: &str,
+    organization_slug: &str,
+    imported_projects: &[BackfillImportedProjectRow],
+    issues: Vec<SentryIssueResponse>,
+) -> Result<Vec<BackfilledIssue>, AppError> {
+    let projects_by_id = imported_projects
+        .iter()
+        .map(|project| (project.sentry_project_id.as_str(), project))
+        .collect::<HashMap<_, _>>();
+    let projects_by_slug = imported_projects
+        .iter()
+        .map(|project| (project.slug.as_str(), project))
+        .collect::<HashMap<_, _>>();
+
+    let mut backfilled = Vec::new();
+
+    for issue in issues {
+        let Some(project_ref) = issue.project.as_ref() else {
+            continue;
+        };
+
+        let Some(imported_project) = projects_by_id
+            .get(project_ref.id.as_str())
+            .or_else(|| projects_by_slug.get(project_ref.slug.as_str()))
+            .copied()
+        else {
+            continue;
+        };
+
+        let exemplar_event =
+            fetch_sentry_issue_exemplar_event(state, access_token, organization_slug, &issue.id)
+                .await?;
+        let code_refs = exemplar_event
+            .as_ref()
+            .map(|event| extract_code_refs_from_event(event, imported_project))
+            .unwrap_or_default();
+
+        backfilled.push(BackfilledIssue {
+            imported_sentry_project_id: imported_project.id,
+            exemplar_event_id: exemplar_event
+                .as_ref()
+                .and_then(|event| event.event_id.clone()),
+            release_name: exemplar_event
+                .as_ref()
+                .and_then(|event| tag_value(&event.tags, "release")),
+            environment: exemplar_event
+                .as_ref()
+                .and_then(|event| tag_value(&event.tags, "environment")),
+            trace_id: exemplar_event
+                .as_ref()
+                .and_then(|event| tag_value(&event.tags, "trace")),
+            issue,
+            code_refs,
+        });
+    }
+
+    Ok(backfilled)
+}
+
+async fn persist_backfilled_issues(
+    executor: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    hotfix_project_id: Uuid,
+    issues: &[BackfilledIssue],
+    prune_missing: bool,
+) -> Result<(), AppError> {
+    if prune_missing {
+        let seen_issue_keys = issues
+            .iter()
+            .map(|issue| (issue.imported_sentry_project_id, issue.issue.id.clone()))
+            .collect::<HashSet<_>>();
+
+        let existing_issue_rows = sqlx::query_as::<_, (Uuid, Uuid, String)>(
+            r#"
+            select id, imported_sentry_project_id, sentry_issue_id
+            from sentry_issue_snapshots
+            where hotfix_project_id = $1
+            "#,
+        )
+        .bind(hotfix_project_id)
+        .fetch_all(&mut **executor)
+        .await?;
+
+        for (snapshot_id, imported_project_id, sentry_issue_id) in existing_issue_rows {
+            if seen_issue_keys.contains(&(imported_project_id, sentry_issue_id.clone())) {
+                continue;
+            }
+
+            sqlx::query(
+                r#"
+                delete from sentry_issue_snapshots
+                where id = $1
+                "#,
+            )
+            .bind(snapshot_id)
+            .execute(&mut **executor)
+            .await?;
+        }
+    }
+
+    for issue in issues {
+        let snapshot_id = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            insert into sentry_issue_snapshots (
+                id,
+                hotfix_project_id,
+                imported_sentry_project_id,
+                sentry_issue_id,
+                short_id,
+                title,
+                culprit,
+                level,
+                status,
+                event_count,
+                user_count,
+                permalink,
+                exemplar_event_id,
+                release_name,
+                environment,
+                trace_id,
+                first_seen_at,
+                last_seen_at,
+                metadata,
+                last_backfilled_at
+            )
+            values (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, now()
+            )
+            on conflict (imported_sentry_project_id, sentry_issue_id) do update
+            set
+                short_id = excluded.short_id,
+                title = excluded.title,
+                culprit = excluded.culprit,
+                level = excluded.level,
+                status = excluded.status,
+                event_count = excluded.event_count,
+                user_count = excluded.user_count,
+                permalink = excluded.permalink,
+                exemplar_event_id = excluded.exemplar_event_id,
+                release_name = excluded.release_name,
+                environment = excluded.environment,
+                trace_id = excluded.trace_id,
+                first_seen_at = excluded.first_seen_at,
+                last_seen_at = excluded.last_seen_at,
+                metadata = excluded.metadata,
+                last_backfilled_at = excluded.last_backfilled_at,
+                updated_at = now()
+            returning id
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(hotfix_project_id)
+        .bind(issue.imported_sentry_project_id)
+        .bind(&issue.issue.id)
+        .bind(&issue.issue.short_id)
+        .bind(&issue.issue.title)
+        .bind(&issue.issue.culprit)
+        .bind(&issue.issue.level)
+        .bind(&issue.issue.status)
+        .bind(issue.issue.count.unwrap_or(0))
+        .bind(issue.issue.user_count.unwrap_or(0))
+        .bind(&issue.issue.permalink)
+        .bind(&issue.exemplar_event_id)
+        .bind(&issue.release_name)
+        .bind(&issue.environment)
+        .bind(&issue.trace_id)
+        .bind(parse_sentry_datetime(issue.issue.first_seen.as_deref()))
+        .bind(parse_sentry_datetime(issue.issue.last_seen.as_deref()))
+        .bind(SqlJson(issue.issue.metadata.clone()))
+        .fetch_one(&mut **executor)
+        .await?;
+
+        sqlx::query(
+            r#"
+            delete from sentry_issue_code_refs
+            where sentry_issue_snapshot_id = $1
+            "#,
+        )
+        .bind(snapshot_id)
+        .execute(&mut **executor)
+        .await?;
+
+        for code_ref in &issue.code_refs {
+            sqlx::query(
+                r#"
+                insert into sentry_issue_code_refs (
+                    id,
+                    sentry_issue_snapshot_id,
+                    github_repo_id,
+                    github_repo_full_name,
+                    github_repo_url,
+                    path,
+                    start_line,
+                    end_line,
+                    symbol,
+                    confidence,
+                    source,
+                    metadata
+                )
+                values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(snapshot_id)
+            .bind(code_ref.github_repo_id)
+            .bind(&code_ref.github_repo_full_name)
+            .bind(&code_ref.github_repo_url)
+            .bind(&code_ref.path)
+            .bind(code_ref.start_line)
+            .bind(code_ref.end_line)
+            .bind(&code_ref.symbol)
+            .bind(code_ref.confidence)
+            .bind(&code_ref.source)
+            .bind(SqlJson(code_ref.metadata.clone()))
+            .execute(&mut **executor)
+            .await?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn clear_hotfix_incident_data(
+    executor: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    hotfix_project_id: Uuid,
+) -> Result<(), AppError> {
+    sqlx::query(
+        r#"
+        update hotfix_projects
+        set last_incident_backfill_at = null, updated_at = now()
+        where id = $1
+        "#,
+    )
+    .bind(hotfix_project_id)
+    .execute(&mut **executor)
+    .await?;
+
+    sqlx::query(
+        r#"
+        delete from hotfix_incidents
+        where hotfix_project_id = $1
+        "#,
+    )
+    .bind(hotfix_project_id)
+    .execute(&mut **executor)
+    .await?;
+
+    sqlx::query(
+        r#"
+        delete from sentry_issue_snapshots
+        where hotfix_project_id = $1
+        "#,
+    )
+    .bind(hotfix_project_id)
+    .execute(&mut **executor)
+    .await?;
+
+    Ok(())
+}
+
+async fn rebuild_hotfix_incidents(
+    executor: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    hotfix_project_id: Uuid,
+) -> Result<(), AppError> {
+    sqlx::query(
+        r#"
+        delete from hotfix_incidents
+        where hotfix_project_id = $1
+        "#,
+    )
+    .bind(hotfix_project_id)
+    .execute(&mut **executor)
+    .await?;
+
+    let snapshots = sqlx::query_as::<_, SentryIssueSnapshotRow>(
+        r#"
+        select
+            id,
+            imported_sentry_project_id,
+            title,
+            culprit,
+            level,
+            status,
+            first_seen_at,
+            last_seen_at
+        from sentry_issue_snapshots
+        where hotfix_project_id = $1
+        order by last_seen_at desc nulls last, title asc
+        "#,
+    )
+    .bind(hotfix_project_id)
+    .fetch_all(&mut **executor)
+    .await?;
+
+    if snapshots.is_empty() {
+        return Ok(());
+    }
+
+    let snapshot_ids = snapshots
+        .iter()
+        .map(|snapshot| snapshot.id)
+        .collect::<Vec<_>>();
+    let code_ref_rows = sqlx::query_as::<_, SentryIssueCodeRefRow>(
+        r#"
+        select
+            sentry_issue_snapshot_id,
+            github_repo_id,
+            github_repo_full_name,
+            github_repo_url,
+            path,
+            start_line,
+            end_line,
+            symbol,
+            confidence,
+            source,
+            metadata
+        from sentry_issue_code_refs
+        where sentry_issue_snapshot_id = any($1)
+        order by confidence desc, path asc, start_line asc nulls last
+        "#,
+    )
+    .bind(&snapshot_ids)
+    .fetch_all(&mut **executor)
+    .await?;
+
+    let mut refs_by_snapshot = HashMap::<Uuid, Vec<SentryIssueCodeRefRow>>::new();
+    for row in code_ref_rows {
+        refs_by_snapshot
+            .entry(row.sentry_issue_snapshot_id)
+            .or_default()
+            .push(row);
+    }
+
+    let mut groups = HashMap::<String, Vec<SentryIssueSnapshotRow>>::new();
+    for snapshot in snapshots {
+        let key = incident_key_for_snapshot(&snapshot, refs_by_snapshot.get(&snapshot.id));
+        groups.entry(key).or_default().push(snapshot);
+    }
+
+    for (incident_key, group) in groups {
+        let incident_id = Uuid::new_v4();
+        let title = incident_title_for_group(&group);
+        let status = incident_status_for_group(&group);
+        let first_seen_at = group
+            .iter()
+            .filter_map(|snapshot| snapshot.first_seen_at)
+            .min();
+        let last_seen_at = group
+            .iter()
+            .filter_map(|snapshot| snapshot.last_seen_at)
+            .max();
+        let sentry_project_count = group
+            .iter()
+            .map(|snapshot| snapshot.imported_sentry_project_id)
+            .collect::<HashSet<_>>()
+            .len() as i32;
+
+        sqlx::query(
+            r#"
+            insert into hotfix_incidents (
+                id,
+                hotfix_project_id,
+                incident_key,
+                title,
+                status,
+                first_seen_at,
+                last_seen_at,
+                issue_count,
+                sentry_project_count
+            )
+            values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            "#,
+        )
+        .bind(incident_id)
+        .bind(hotfix_project_id)
+        .bind(&incident_key)
+        .bind(&title)
+        .bind(&status)
+        .bind(first_seen_at)
+        .bind(last_seen_at)
+        .bind(group.len() as i32)
+        .bind(sentry_project_count)
+        .execute(&mut **executor)
+        .await?;
+
+        for snapshot in &group {
+            sqlx::query(
+                r#"
+                insert into incident_sentry_issues (
+                    id,
+                    incident_id,
+                    sentry_issue_snapshot_id
+                )
+                values ($1, $2, $3)
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(incident_id)
+            .bind(snapshot.id)
+            .execute(&mut **executor)
+            .await?;
+        }
+
+        let mut deduped_refs = HashMap::<String, SentryIssueCodeRefRow>::new();
+        for snapshot in &group {
+            if let Some(code_refs) = refs_by_snapshot.get(&snapshot.id) {
+                for code_ref in code_refs {
+                    let key = format!(
+                        "{}|{}|{}|{}|{}",
+                        code_ref.github_repo_full_name.as_deref().unwrap_or(""),
+                        code_ref.path,
+                        code_ref.start_line.unwrap_or_default(),
+                        code_ref.end_line.unwrap_or_default(),
+                        code_ref.source,
+                    );
+
+                    let replace = deduped_refs
+                        .get(&key)
+                        .map(|existing| code_ref.confidence > existing.confidence)
+                        .unwrap_or(true);
+
+                    if replace {
+                        deduped_refs.insert(
+                            key,
+                            SentryIssueCodeRefRow {
+                                sentry_issue_snapshot_id: code_ref.sentry_issue_snapshot_id,
+                                github_repo_id: code_ref.github_repo_id,
+                                github_repo_full_name: code_ref.github_repo_full_name.clone(),
+                                github_repo_url: code_ref.github_repo_url.clone(),
+                                path: code_ref.path.clone(),
+                                start_line: code_ref.start_line,
+                                end_line: code_ref.end_line,
+                                symbol: code_ref.symbol.clone(),
+                                confidence: code_ref.confidence,
+                                source: code_ref.source.clone(),
+                                metadata: SqlJson(code_ref.metadata.0.clone()),
+                            },
+                        );
+                    }
+                }
+            }
+        }
+
+        for code_ref in deduped_refs.into_values() {
+            sqlx::query(
+                r#"
+                insert into incident_code_refs (
+                    id,
+                    incident_id,
+                    github_repo_id,
+                    github_repo_full_name,
+                    github_repo_url,
+                    path,
+                    start_line,
+                    end_line,
+                    symbol,
+                    confidence,
+                    source,
+                    metadata
+                )
+                values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(incident_id)
+            .bind(code_ref.github_repo_id)
+            .bind(&code_ref.github_repo_full_name)
+            .bind(&code_ref.github_repo_url)
+            .bind(&code_ref.path)
+            .bind(code_ref.start_line)
+            .bind(code_ref.end_line)
+            .bind(&code_ref.symbol)
+            .bind(code_ref.confidence)
+            .bind(&code_ref.source)
+            .bind(code_ref.metadata)
+            .execute(&mut **executor)
+            .await?;
+        }
+    }
+
+    Ok(())
+}
+
 async fn sync_imported_sentry_projects(
     executor: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     hotfix_project_id: Uuid,
     sentry_connection_id: Uuid,
     projects: &[SentryProjectResponse],
+    metrics_by_project_id: &HashMap<String, SentryProjectMetricsSnapshot>,
+    sentry_repositories: &HashSet<String>,
 ) -> Result<(), AppError> {
     let mut seen_project_ids = HashSet::new();
 
     for project in projects {
         seen_project_ids.insert(project.id.clone());
+        let metrics = metrics_by_project_id
+            .get(&project.id)
+            .cloned()
+            .unwrap_or_default();
         sqlx::query(
             r#"
             insert into imported_sentry_projects (
@@ -2124,15 +4161,29 @@ async fn sync_imported_sentry_projects(
                 sentry_project_id,
                 slug,
                 name,
-                platform
+                platform,
+                errors_24h,
+                transactions_24h,
+                replays_24h,
+                profiles_24h,
+                errors_24h_series,
+                transactions_24h_series,
+                synced_at
             )
-            values ($1, $2, $3, $4, $5, $6, $7)
+            values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now())
             on conflict (hotfix_project_id, sentry_project_id) do update
             set
                 sentry_connection_id = excluded.sentry_connection_id,
                 slug = excluded.slug,
                 name = excluded.name,
                 platform = excluded.platform,
+                errors_24h = excluded.errors_24h,
+                transactions_24h = excluded.transactions_24h,
+                replays_24h = excluded.replays_24h,
+                profiles_24h = excluded.profiles_24h,
+                errors_24h_series = excluded.errors_24h_series,
+                transactions_24h_series = excluded.transactions_24h_series,
+                synced_at = excluded.synced_at,
                 updated_at = now()
             "#,
         )
@@ -2143,6 +4194,12 @@ async fn sync_imported_sentry_projects(
         .bind(&project.slug)
         .bind(&project.name)
         .bind(&project.platform)
+        .bind(metrics.errors_24h)
+        .bind(metrics.transactions_24h)
+        .bind(metrics.replays_24h)
+        .bind(metrics.profiles_24h)
+        .bind(SqlJson(metrics.errors_24h_series.clone()))
+        .bind(SqlJson(metrics.transactions_24h_series.clone()))
         .execute(&mut **executor)
         .await?;
     }
@@ -2173,7 +4230,255 @@ async fn sync_imported_sentry_projects(
         }
     }
 
+    let project_repo_rows = sqlx::query_as::<_, (Uuid, Option<String>)>(
+        r#"
+        select
+            imported_sentry_projects.id,
+            sentry_project_repo_mappings.github_repo_full_name
+        from imported_sentry_projects
+        left join sentry_project_repo_mappings
+            on sentry_project_repo_mappings.imported_sentry_project_id = imported_sentry_projects.id
+        where imported_sentry_projects.hotfix_project_id = $1
+        "#,
+    )
+    .bind(hotfix_project_id)
+    .fetch_all(&mut **executor)
+    .await?;
+
+    for (imported_project_id, github_repo_full_name) in project_repo_rows {
+        let sentry_repo_connected = github_repo_full_name
+            .as_deref()
+            .map(|name| sentry_repositories.contains(&name.to_lowercase()))
+            .unwrap_or(false);
+
+        sqlx::query(
+            r#"
+            update imported_sentry_projects
+            set sentry_repo_connected = $1, updated_at = now()
+            where id = $2
+            "#,
+        )
+        .bind(sentry_repo_connected)
+        .bind(imported_project_id)
+        .execute(&mut **executor)
+        .await?;
+    }
+
     Ok(())
+}
+
+async fn sync_hotfix_project_graph(
+    executor: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    hotfix_project_id: Uuid,
+) -> Result<(), AppError> {
+    let exists = sqlx::query_scalar::<_, bool>(
+        r#"
+        select exists(
+            select 1
+            from hotfix_projects
+            where id = $1
+        )
+        "#,
+    )
+    .bind(hotfix_project_id)
+    .fetch_one(&mut **executor)
+    .await?;
+
+    if !exists {
+        return Err(AppError::NotFound(
+            "The requested Hotfix project was not found.".into(),
+        ));
+    }
+
+    let imported_projects = sqlx::query_as::<_, GraphImportedProjectRow>(
+        r#"
+            select
+                imported_sentry_projects.id,
+                imported_sentry_projects.sentry_project_id,
+                imported_sentry_projects.slug,
+                imported_sentry_projects.name,
+                imported_sentry_projects.platform,
+                imported_sentry_projects.included,
+                imported_sentry_projects.errors_24h,
+                imported_sentry_projects.transactions_24h,
+                imported_sentry_projects.replays_24h,
+                imported_sentry_projects.profiles_24h,
+                imported_sentry_projects.errors_24h_series,
+                imported_sentry_projects.transactions_24h_series,
+                imported_sentry_projects.sentry_repo_connected,
+                sentry_project_repo_mappings.github_repo_full_name,
+                sentry_project_repo_mappings.github_repo_url
+        from imported_sentry_projects
+        left join sentry_project_repo_mappings
+            on sentry_project_repo_mappings.imported_sentry_project_id = imported_sentry_projects.id
+        where imported_sentry_projects.hotfix_project_id = $1
+        order by imported_sentry_projects.included desc, imported_sentry_projects.name asc
+        "#,
+    )
+    .bind(hotfix_project_id)
+    .fetch_all(&mut **executor)
+    .await?;
+
+    let existing_positions = sqlx::query_as::<_, ExistingGraphNodePositionRow>(
+        r#"
+        select node_key, position_x, position_y
+        from hotfix_project_graph_nodes
+        where hotfix_project_id = $1 and is_system = true
+        "#,
+    )
+    .bind(hotfix_project_id)
+    .fetch_all(&mut **executor)
+    .await?
+    .into_iter()
+    .map(|row| (row.node_key, (row.position_x, row.position_y)))
+    .collect::<HashMap<_, _>>();
+    let has_legacy_org_node = existing_positions
+        .keys()
+        .any(|node_key| node_key.starts_with("sentry-org:"));
+
+    let mut seen_node_keys = Vec::new();
+
+    let imported_project_count = imported_projects.len();
+
+    for (index, imported_project) in imported_projects.iter().enumerate() {
+        let node_key = format!("sentry-project:{}", imported_project.sentry_project_id);
+        let (default_x, default_y) =
+            default_system_project_graph_position(index, imported_project_count);
+        let position = if has_legacy_org_node {
+            (default_x, default_y)
+        } else {
+            existing_positions
+                .get(&node_key)
+                .copied()
+                .unwrap_or((default_x, default_y))
+        };
+        let description = imported_project
+            .platform
+            .clone()
+            .or_else(|| Some(imported_project.slug.clone()));
+        let node_metadata = json!({
+            "provider": "sentry",
+            "sentryProjectId": imported_project.sentry_project_id,
+            "slug": imported_project.slug,
+            "platform": imported_project.platform,
+            "included": imported_project.included,
+            "errors24h": imported_project.errors_24h,
+            "transactions24h": imported_project.transactions_24h,
+            "replays24h": imported_project.replays_24h,
+            "profiles24h": imported_project.profiles_24h,
+            "errors24hSeries": imported_project.errors_24h_series.0,
+            "transactions24hSeries": imported_project.transactions_24h_series.0,
+            "sentryRepoConnected": imported_project.sentry_repo_connected,
+            "hotfixRepoConnected": imported_project.github_repo_full_name.is_some(),
+            "githubRepoFullName": imported_project.github_repo_full_name,
+            "githubRepoUrl": imported_project.github_repo_url
+        });
+
+        sqlx::query(
+            r#"
+            insert into hotfix_project_graph_nodes (
+                id,
+                hotfix_project_id,
+                imported_sentry_project_id,
+                node_key,
+                node_type,
+                label,
+                description,
+                position_x,
+                position_y,
+                metadata,
+                is_system
+            )
+            values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true)
+            on conflict (hotfix_project_id, node_key) do update
+            set
+                imported_sentry_project_id = excluded.imported_sentry_project_id,
+                node_type = excluded.node_type,
+                label = excluded.label,
+                description = excluded.description,
+                metadata = excluded.metadata,
+                is_system = excluded.is_system,
+                updated_at = now()
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(hotfix_project_id)
+        .bind(imported_project.id)
+        .bind(&node_key)
+        .bind("sentry-project")
+        .bind(&imported_project.name)
+        .bind(description)
+        .bind(position.0)
+        .bind(position.1)
+        .bind(SqlJson(node_metadata))
+        .execute(&mut **executor)
+        .await?;
+
+        seen_node_keys.push(node_key);
+    }
+
+    sqlx::query(
+        r#"
+        delete from hotfix_project_graph_edges
+        where hotfix_project_id = $1 and is_system = true
+        "#,
+    )
+    .bind(hotfix_project_id)
+    .execute(&mut **executor)
+    .await?;
+
+    if seen_node_keys.is_empty() {
+        sqlx::query(
+            r#"
+            delete from hotfix_project_graph_nodes
+            where hotfix_project_id = $1 and is_system = true
+            "#,
+        )
+        .bind(hotfix_project_id)
+        .execute(&mut **executor)
+        .await?;
+    } else {
+        sqlx::query(
+            r#"
+            delete from hotfix_project_graph_nodes
+            where hotfix_project_id = $1
+              and is_system = true
+              and node_key <> all($2)
+            "#,
+        )
+        .bind(hotfix_project_id)
+        .bind(&seen_node_keys)
+        .execute(&mut **executor)
+        .await?;
+    }
+
+    Ok(())
+}
+
+fn default_system_project_graph_position(index: usize, total: usize) -> (f64, f64) {
+    const GRAPH_CARD_WIDTH: f64 = 248.0;
+    const GRAPH_CARD_HEIGHT: f64 = 154.0;
+    const GRAPH_CARD_COLUMN_GAP: f64 = 88.0;
+    const GRAPH_CARD_ROW_GAP: f64 = 72.0;
+    const GRAPH_GRID_MAX_COLUMNS: usize = 4;
+    const GRAPH_LAYOUT_START_Y: f64 = 120.0;
+
+    let mut columns = (total as f64).sqrt().ceil() as usize;
+    columns = columns.clamp(1, GRAPH_GRID_MAX_COLUMNS);
+
+    let mut total_width = columns as f64 * GRAPH_CARD_WIDTH;
+    if columns > 1 {
+        total_width += (columns - 1) as f64 * GRAPH_CARD_COLUMN_GAP;
+    }
+
+    let column = index % columns;
+    let row = index / columns;
+    let start_x = total_width * -0.5;
+
+    (
+        start_x + column as f64 * (GRAPH_CARD_WIDTH + GRAPH_CARD_COLUMN_GAP),
+        GRAPH_LAYOUT_START_Y + row as f64 * (GRAPH_CARD_HEIGHT + GRAPH_CARD_ROW_GAP),
+    )
 }
 
 fn encrypt_provider_token(secret: &[u8], token: &str) -> Result<(Vec<u8>, Vec<u8>), AppError> {
@@ -2227,10 +4532,311 @@ fn parse_sentry_next_cursor(link_header: Option<&str>) -> Option<String> {
     None
 }
 
+fn incremental_issue_sync_start(since: OffsetDateTime) -> String {
+    let conservative_start = since - time::Duration::minutes(1);
+    conservative_start
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| since.unix_timestamp().to_string())
+}
+
+fn required_text_field(value: &str, message: &str) -> Result<String, AppError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::BadRequest(message.to_string()));
+    }
+
+    Ok(trimmed.to_string())
+}
+
+fn optional_text_field(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn deserialize_string_from_string_or_number<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    match JsonValue::deserialize(deserializer)? {
+        JsonValue::String(value) => Ok(value),
+        JsonValue::Number(value) => Ok(value.to_string()),
+        other => Err(serde::de::Error::custom(format!(
+            "expected string or number, got {other}"
+        ))),
+    }
+}
+
+fn deserialize_option_i64_from_string_or_number<'de, D>(
+    deserializer: D,
+) -> Result<Option<i64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    match Option::<JsonValue>::deserialize(deserializer)? {
+        None | Some(JsonValue::Null) => Ok(None),
+        Some(JsonValue::String(value)) => value
+            .parse::<i64>()
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+        Some(JsonValue::Number(value)) => value
+            .as_i64()
+            .ok_or_else(|| serde::de::Error::custom("expected an integer number"))
+            .map(Some),
+        Some(other) => Err(serde::de::Error::custom(format!(
+            "expected string, number, or null, got {other}"
+        ))),
+    }
+}
+
+fn has_scope(scopes: Option<&str>, required_scope: &str) -> bool {
+    scopes
+        .unwrap_or_default()
+        .split(|character: char| character.is_ascii_whitespace() || character == ',')
+        .any(|scope| scope == required_scope)
+}
+
+fn parse_sentry_datetime(value: Option<&str>) -> Option<OffsetDateTime> {
+    value.and_then(|raw| OffsetDateTime::parse(raw, &Rfc3339).ok())
+}
+
+fn timestamp_millis(value: Option<OffsetDateTime>) -> Option<i64> {
+    value.map(|timestamp| (timestamp.unix_timestamp_nanos() / 1_000_000) as i64)
+}
+
+fn tag_value(tags: &[SentryTagResponse], key: &str) -> Option<String> {
+    tags.iter()
+        .find(|tag| tag.key == key)
+        .map(|tag| tag.value.clone())
+}
+
+fn extract_code_refs_from_event(
+    event: &SentryIssueEventResponse,
+    imported_project: &BackfillImportedProjectRow,
+) -> Vec<IssueCodeRefCandidate> {
+    let mut refs = Vec::new();
+    let mut seen = HashSet::new();
+
+    for entry in &event.entries {
+        let Some(entry_type) = entry.get("type").and_then(|value| value.as_str()) else {
+            continue;
+        };
+
+        if entry_type != "exception" && entry_type != "threads" {
+            continue;
+        }
+
+        let Some(values) = entry
+            .get("data")
+            .and_then(|data| data.get("values"))
+            .and_then(|values| values.as_array())
+        else {
+            continue;
+        };
+
+        for value in values.iter().rev() {
+            let Some(frames) = value
+                .get("stacktrace")
+                .and_then(|stacktrace| stacktrace.get("frames"))
+                .and_then(|frames| frames.as_array())
+            else {
+                continue;
+            };
+
+            for (frame_index, frame) in frames.iter().rev().enumerate() {
+                let in_app = frame
+                    .get("inApp")
+                    .or_else(|| frame.get("in_app"))
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false);
+                if !in_app {
+                    continue;
+                }
+
+                let path = frame
+                    .get("filename")
+                    .or_else(|| frame.get("absPath"))
+                    .or_else(|| frame.get("abs_path"))
+                    .or_else(|| frame.get("module"))
+                    .and_then(|value| value.as_str())
+                    .map(|value| value.trim().trim_start_matches("./").to_string())
+                    .filter(|value| !value.is_empty());
+                let Some(path) = path else {
+                    continue;
+                };
+
+                let start_line = frame
+                    .get("lineno")
+                    .and_then(|value| value.as_i64())
+                    .and_then(|value| i32::try_from(value).ok());
+                let end_line = start_line;
+                let symbol = frame
+                    .get("function")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string)
+                    .filter(|value| !value.trim().is_empty());
+                let key = format!(
+                    "{}|{}|{}|{}",
+                    imported_project
+                        .github_repo_full_name
+                        .as_deref()
+                        .unwrap_or(""),
+                    path,
+                    start_line.unwrap_or_default(),
+                    symbol.as_deref().unwrap_or(""),
+                );
+                if !seen.insert(key) {
+                    continue;
+                }
+
+                let confidence = (0.96_f64 - frame_index as f64 * 0.12).max(0.42);
+                refs.push(IssueCodeRefCandidate {
+                    github_repo_id: imported_project.github_repo_id,
+                    github_repo_full_name: imported_project.github_repo_full_name.clone(),
+                    github_repo_url: imported_project.github_repo_url.clone(),
+                    path,
+                    start_line,
+                    end_line,
+                    symbol,
+                    confidence,
+                    source: "stack_frame".to_string(),
+                    metadata: json!({
+                        "module": frame.get("module").and_then(|value| value.as_str()),
+                        "absPath": frame
+                            .get("absPath")
+                            .or_else(|| frame.get("abs_path"))
+                            .and_then(|value| value.as_str()),
+                        "projectSlug": imported_project.slug,
+                        "eventId": event.event_id,
+                        "eventDateCreated": event.date_created,
+                    }),
+                });
+
+                if refs.len() >= 5 {
+                    return refs;
+                }
+            }
+        }
+    }
+
+    refs
+}
+
+fn incident_key_for_snapshot(
+    snapshot: &SentryIssueSnapshotRow,
+    code_refs: Option<&Vec<SentryIssueCodeRefRow>>,
+) -> String {
+    let reference = code_refs
+        .and_then(|rows| rows.first())
+        .map(|row| {
+            format!(
+                "{}|{}|{}",
+                row.github_repo_full_name.as_deref().unwrap_or(""),
+                row.path,
+                row.symbol.as_deref().unwrap_or("")
+            )
+        })
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| {
+            format!(
+                "{}|{}|{}",
+                normalize_incident_component(&snapshot.title),
+                snapshot
+                    .culprit
+                    .as_deref()
+                    .map(normalize_incident_component)
+                    .unwrap_or_default(),
+                snapshot
+                    .level
+                    .as_deref()
+                    .map(normalize_incident_component)
+                    .unwrap_or_default()
+            )
+        });
+
+    format!(
+        "{}-{}",
+        normalize_incident_component(&snapshot.title),
+        short_sha(&reference)
+    )
+}
+
+fn incident_title_for_group(group: &[SentryIssueSnapshotRow]) -> String {
+    group
+        .iter()
+        .max_by_key(|snapshot| snapshot.last_seen_at)
+        .map(|snapshot| snapshot.title.clone())
+        .unwrap_or_else(|| "Incident".to_string())
+}
+
+fn incident_status_for_group(group: &[SentryIssueSnapshotRow]) -> String {
+    if group
+        .iter()
+        .any(|snapshot| snapshot.status != "resolved" && snapshot.status != "ignored")
+    {
+        "unresolved".to_string()
+    } else {
+        "resolved".to_string()
+    }
+}
+
+fn normalize_incident_component(value: &str) -> String {
+    let mut normalized = String::new();
+    let mut last_dash = false;
+
+    for character in value.trim().chars() {
+        let lower = character.to_ascii_lowercase();
+        if lower.is_ascii_alphanumeric() {
+            normalized.push(lower);
+            last_dash = false;
+        } else if !last_dash {
+            normalized.push('-');
+            last_dash = true;
+        }
+    }
+
+    let normalized = normalized.trim_matches('-').to_string();
+    if normalized.is_empty() {
+        "incident".to_string()
+    } else {
+        normalized
+    }
+}
+
+fn short_sha(value: &str) -> String {
+    let digest = Sha256::digest(value.as_bytes());
+    digest[..6]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>()
+}
+
 fn extract_cursor_value(part: &str) -> Option<String> {
     let (_, cursor_part) = part.split_once("cursor=\"")?;
     let (cursor, _) = cursor_part.split_once('"')?;
     Some(cursor.to_string())
+}
+
+fn json_string(row: &HashMap<String, JsonValue>, key: &str) -> Option<String> {
+    row.get(key)
+        .and_then(|value| value.as_str().map(str::to_string))
+}
+
+fn json_i64(row: &HashMap<String, JsonValue>, key: &str) -> Option<i64> {
+    row.get(key).and_then(|value| match value {
+        JsonValue::Number(number) => number
+            .as_i64()
+            .or_else(|| number.as_f64().map(|n| n.round() as i64)),
+        _ => None,
+    })
+}
+
+fn json_f64(row: &HashMap<String, JsonValue>, key: &str) -> Option<f64> {
+    row.get(key).and_then(|value| match value {
+        JsonValue::Number(number) => number.as_f64(),
+        _ => None,
+    })
 }
 
 fn init_tracing() {
@@ -2359,9 +4965,10 @@ async fn generate_unique_project_slug(
 #[cfg(test)]
 mod tests {
     use super::{
-        GitHubEmail, Provider, normalize_email, pkce_challenge, select_github_email,
-        slugify_project_name,
+        GitHubEmail, Provider, SentryIssueResponse, SentryProjectResponse, normalize_email,
+        pkce_challenge, select_github_email, slugify_project_name,
     };
+    use serde_json::json;
 
     #[test]
     fn provider_slug_parser_is_strict() {
@@ -2422,5 +5029,45 @@ mod tests {
         assert_eq!(slugify_project_name("Zeus server"), "zeus-server");
         assert_eq!(slugify_project_name("  API / Gateway  "), "api-gateway");
         assert_eq!(slugify_project_name("!!!"), "project");
+    }
+
+    #[test]
+    fn sentry_issue_response_accepts_numeric_user_count() {
+        let issue = serde_json::from_value::<SentryIssueResponse>(json!({
+            "id": "123",
+            "shortId": "ORG-123",
+            "title": "Example issue",
+            "culprit": "app/main.py in handler",
+            "level": "error",
+            "status": "unresolved",
+            "count": "42",
+            "userCount": 0,
+            "firstSeen": "2026-04-02T00:00:00Z",
+            "lastSeen": "2026-04-02T01:00:00Z",
+            "project": {
+                "id": 7,
+                "slug": "backend"
+            }
+        }))
+        .expect("issue response should deserialize");
+
+        assert_eq!(issue.count, Some(42));
+        assert_eq!(issue.user_count, Some(0));
+        assert_eq!(
+            issue.project.as_ref().map(|project| project.id.as_str()),
+            Some("7")
+        );
+    }
+
+    #[test]
+    fn sentry_project_response_accepts_numeric_id() {
+        let project = serde_json::from_value::<SentryProjectResponse>(json!({
+            "id": 99,
+            "slug": "backend",
+            "name": "Backend"
+        }))
+        .expect("project response should deserialize");
+
+        assert_eq!(project.id, "99");
     }
 }

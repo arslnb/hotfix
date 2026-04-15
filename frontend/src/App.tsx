@@ -8,6 +8,7 @@ import {
   onCleanup,
   onMount,
 } from "solid-js";
+import { ProjectHomeGraph } from "./components/ProjectHomeGraph";
 
 const sentryIcon = new URL("./assets/sentry.svg", import.meta.url).href;
 const githubIcon = new URL("./assets/github.svg", import.meta.url).href;
@@ -66,6 +67,48 @@ type HotfixProject = {
   sentryProjects: ImportedSentryProject[];
 };
 
+type IncidentSentryIssue = {
+  id: string;
+  sentryIssueId: string;
+  shortId: string | null;
+  title: string;
+  status: string;
+  level: string | null;
+  projectSlug: string;
+  projectName: string;
+  permalink: string | null;
+  eventCount: number;
+  userCount: number;
+  firstSeenAt: number | null;
+  lastSeenAt: number | null;
+};
+
+type IncidentCodeRef = {
+  id: string;
+  githubRepoId: number | null;
+  githubRepoFullName: string | null;
+  githubRepoUrl: string | null;
+  path: string;
+  startLine: number | null;
+  endLine: number | null;
+  symbol: string | null;
+  confidence: number;
+  source: string;
+};
+
+type HotfixIncident = {
+  id: string;
+  incidentKey: string;
+  title: string;
+  status: string;
+  firstSeenAt: number | null;
+  lastSeenAt: number | null;
+  issueCount: number;
+  sentryProjectCount: number;
+  sentryIssues: IncidentSentryIssue[];
+  codeRefs: IncidentCodeRef[];
+};
+
 type DashboardPayload = {
   sentryOrganizations: SentryOrganizationSummary[];
   projects: HotfixProject[];
@@ -96,6 +139,23 @@ const fetchSession = async (): Promise<SessionResponse> => {
 
 const fetchDashboard = async (): Promise<DashboardPayload> => {
   return fetchJson<DashboardPayload>("/api/dashboard", {
+    headers: {
+      Accept: "application/json",
+    },
+  });
+};
+
+const fetchHotfixIncidents = async (projectId: string): Promise<HotfixIncident[]> => {
+  return fetchJson<HotfixIncident[]>(`/api/hotfix-projects/${projectId}/incidents`, {
+    headers: {
+      Accept: "application/json",
+    },
+  });
+};
+
+const backfillHotfixIncidents = async (projectId: string): Promise<HotfixIncident[]> => {
+  return fetchJson<HotfixIncident[]>(`/api/hotfix-projects/${projectId}/backfill-incidents`, {
+    method: "POST",
     headers: {
       Accept: "application/json",
     },
@@ -1563,7 +1623,10 @@ function ProjectWorkspace(props: {
 }) {
   const [editingName, setEditingName] = createSignal(false);
   const [draftName, setDraftName] = createSignal(props.project.name);
-  const [refreshingImports, setRefreshingImports] = createSignal(false);
+  const [headerLoadingState, setHeaderLoadingState] = createSignal<{ active: boolean; label: string }>({
+    active: false,
+    label: "",
+  });
   const [renameError, setRenameError] = createSignal<string | null>(null);
   const [savingName, setSavingName] = createSignal(false);
 
@@ -1612,7 +1675,7 @@ function ProjectWorkspace(props: {
 
   return (
     <div class="project-workspace">
-      <div class="project-page-header-shell" classList={{ "is-loading": refreshingImports() }}>
+      <div class="project-page-header-shell" classList={{ "is-loading": headerLoadingState().active }}>
         <header class="project-page-header">
           <div class="project-page-header-side">
             <button class="project-workspace-back" type="button" onClick={props.onBack}>
@@ -1672,34 +1735,36 @@ function ProjectWorkspace(props: {
         </header>
       </div>
 
-      <Show when={refreshingImports()}>
+      <Show when={headerLoadingState().active}>
         <div class="project-header-loading-state" role="status" aria-live="polite">
-          Refreshing Sentry projects...
+          {headerLoadingState().label}
         </div>
       </Show>
 
-      <div class="project-workspace-body">
+      <div class="project-workspace-body" classList={{ "is-home": props.activeSection === "home" }}>
         <Show when={renameError()}>
           {(message) => <p class="project-workspace-error">{message()}</p>}
         </Show>
 
-        <div class="project-workspace-hero">
-          <div class="project-workspace-copy">
-            <p class="project-workspace-subtitle">
-              {props.project.sentryOrganization?.name ?? "No Sentry organization selected"}
-            </p>
-            <p class="project-workspace-meta">
-              {formatSentryProjectCount(props.project.sentryProjects.length)} imported · Created{" "}
-              {formatProjectDate(props.project.createdAt)}
-            </p>
+        <Show when={props.activeSection !== "home"}>
+          <div class="project-workspace-hero">
+            <div class="project-workspace-copy">
+              <p class="project-workspace-subtitle">
+                {props.project.sentryOrganization?.name ?? "No Sentry organization selected"}
+              </p>
+              <p class="project-workspace-meta">
+                {formatSentryProjectCount(props.project.sentryProjects.length)} imported · Created{" "}
+                {formatProjectDate(props.project.createdAt)}
+              </p>
+            </div>
+            <ProjectSparkline seed={`${props.project.id}:${props.project.name}`} compact={false} />
           </div>
-          <ProjectSparkline seed={`${props.project.id}:${props.project.name}`} compact={false} />
-        </div>
+        </Show>
 
         <ProjectSectionContent
           activeSection={props.activeSection}
           project={props.project}
-          onRefreshStateChange={setRefreshingImports}
+          onHeaderLoadingChange={(active, label) => setHeaderLoadingState({ active, label })}
           onRefreshSentryProjects={props.onRefreshSentryProjects}
           onUpdateSentryProjectSelection={props.onUpdateSentryProjectSelection}
         />
@@ -1711,7 +1776,7 @@ function ProjectWorkspace(props: {
 function ProjectSectionContent(props: {
   activeSection: ProjectRouteSection;
   project: HotfixProject;
-  onRefreshStateChange: (refreshing: boolean) => void;
+  onHeaderLoadingChange: (active: boolean, label: string) => void;
   onRefreshSentryProjects: (projectId: string) => Promise<HotfixProject>;
   onUpdateSentryProjectSelection: (projectId: string, includedProjectIds: string[]) => Promise<void>;
 }) {
@@ -1721,7 +1786,7 @@ function ProjectSectionContent(props: {
         return {
           eyebrow: "Overview",
           heading: "Project home",
-          body: "This is the project overview page. It will become the launch surface for Sentry imports, repo mappings, and the latest health signals.",
+          body: "This section now renders the persisted Sentry graph for the current Hotfix project.",
         };
       case "logs":
         return {
@@ -1751,9 +1816,22 @@ function ProjectSectionContent(props: {
   });
 
   return (
-    <Show
-      when={props.activeSection === "settings"}
-      fallback={
+    <>
+      <Show when={props.activeSection === "home"}>
+        <ProjectHomeSection project={props.project} />
+      </Show>
+      <Show when={props.activeSection === "settings"}>
+        <ProjectSettingsSection
+          project={props.project}
+          onHeaderLoadingChange={props.onHeaderLoadingChange}
+          onRefreshSentryProjects={props.onRefreshSentryProjects}
+          onUpdateSentryProjectSelection={props.onUpdateSentryProjectSelection}
+        />
+      </Show>
+      <Show when={props.activeSection === "incidents"}>
+        <ProjectIncidentsSection project={props.project} onHeaderLoadingChange={props.onHeaderLoadingChange} />
+      </Show>
+      <Show when={props.activeSection !== "home" && props.activeSection !== "settings" && props.activeSection !== "incidents"}>
         <div class="project-workspace-grid">
           <div class="logged-in-card">
             <p class="logged-in-card-label">{title().eyebrow}</p>
@@ -1776,21 +1854,198 @@ function ProjectSectionContent(props: {
             </p>
           </div>
         </div>
-      }
-    >
-      <ProjectSettingsSection
-        project={props.project}
-        onRefreshStateChange={props.onRefreshStateChange}
-        onRefreshSentryProjects={props.onRefreshSentryProjects}
-        onUpdateSentryProjectSelection={props.onUpdateSentryProjectSelection}
-      />
-    </Show>
+      </Show>
+    </>
+  );
+}
+
+function ProjectHomeSection(props: { project: HotfixProject }) {
+  const refreshKey = createMemo(() => {
+    const sentrySignature = props.project.sentryProjects
+      .map(
+        (project) =>
+          `${project.id}:${project.included}:${project.repoMapping?.repoId ?? "none"}:${project.slug}`,
+      )
+      .join("|");
+
+    return `${props.project.sentryOrganization?.connectionId ?? "no-org"}:${sentrySignature}`;
+  });
+
+  return <ProjectHomeGraph projectId={props.project.id} refreshKey={refreshKey()} />;
+}
+
+function ProjectIncidentsSection(props: {
+  project: HotfixProject;
+  onHeaderLoadingChange: (active: boolean, label: string) => void;
+}) {
+  const [syncing, setSyncing] = createSignal(false);
+  const [syncError, setSyncError] = createSignal<string | null>(null);
+  const [incidents, { refetch, mutate }] = createResource(
+    () => props.project.id,
+    async (projectId) => fetchHotfixIncidents(projectId),
+  );
+
+  const handleBackfill = async () => {
+    setSyncing(true);
+    setSyncError(null);
+    props.onHeaderLoadingChange(true, "Backfilling incidents from Sentry...");
+
+    try {
+      const payload = await backfillHotfixIncidents(props.project.id);
+      mutate(payload);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not backfill incidents from Sentry.";
+      setSyncError(message);
+    } finally {
+      setSyncing(false);
+      props.onHeaderLoadingChange(false, "");
+    }
+  };
+
+  onCleanup(() => {
+    props.onHeaderLoadingChange(false, "");
+  });
+
+  return (
+    <div class="project-incidents-shell">
+      <div class="project-incidents-header">
+        <div>
+          <p class="project-incidents-title">Hotfix incidents</p>
+          <p class="project-incidents-copy">
+            Hotfix groups linked Sentry issues into local incidents so this view can stay DB-backed after the
+            initial backfill.
+          </p>
+        </div>
+        <div class="project-incidents-actions">
+          <button class="project-secondary-button" type="button" onClick={() => void refetch()} disabled={incidents.loading || syncing()}>
+            Refresh list
+          </button>
+          <button class="brand-button" type="button" onClick={() => void handleBackfill()} disabled={syncing()}>
+            {syncing() ? "Backfilling..." : "Backfill from Sentry"}
+          </button>
+        </div>
+      </div>
+
+      <Show when={syncError()}>
+        {(message) => <p class="project-workspace-error">{message()}</p>}
+      </Show>
+
+      <Show
+        when={!incidents.error}
+        fallback={
+          <div class="logged-in-card">
+            <p class="logged-in-card-label">Incidents</p>
+            <h3 class="logged-in-card-title">Incident data is unavailable</h3>
+            <p class="logged-in-card-copy">Hotfix could not load the local incident projection for this project.</p>
+          </div>
+        }
+      >
+        <Show
+          when={!incidents.loading}
+          fallback={
+            <div class="project-incidents-list" aria-hidden="true">
+              <div class="projects-loading-row" />
+              <div class="projects-loading-row" />
+            </div>
+          }
+        >
+          <Show
+            when={(incidents()?.length ?? 0) > 0}
+            fallback={
+              <div class="logged-in-card">
+                <p class="logged-in-card-label">No incidents yet</p>
+                <h3 class="logged-in-card-title">Run the first Sentry backfill</h3>
+                <p class="logged-in-card-copy">
+                  Hotfix will import unresolved Sentry issues, create local issue snapshots, and group them into
+                  project incidents.
+                </p>
+              </div>
+            }
+          >
+            <div class="project-incidents-list">
+              <For each={incidents() ?? []}>
+                {(incident) => (
+                  <article class="project-incident-card">
+                    <div class="project-incident-top">
+                      <div class="project-incident-copy">
+                        <div class="project-incident-meta-row">
+                          <span class="project-incident-status">{incident.status}</span>
+                          <span class="project-incident-meta">
+                            {incident.issueCount} issue{incident.issueCount === 1 ? "" : "s"} · {incident.sentryProjectCount} project
+                            {incident.sentryProjectCount === 1 ? "" : "s"}
+                          </span>
+                        </div>
+                        <h3 class="project-incident-title">{incident.title}</h3>
+                        <p class="project-incident-meta">
+                          Last seen {formatProjectDate(incident.lastSeenAt ?? incident.firstSeenAt ?? Date.now())}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div class="project-incident-sections">
+                      <div class="project-incident-section">
+                        <p class="project-incident-section-label">Sentry issues</p>
+                        <div class="project-incident-chip-wrap">
+                          <For each={incident.sentryIssues.slice(0, 5)}>
+                            {(issue) => (
+                              <a
+                                class="project-incident-chip"
+                                href={issue.permalink ?? "#"}
+                                target={issue.permalink ? "_blank" : undefined}
+                                rel={issue.permalink ? "noreferrer" : undefined}
+                              >
+                                <span>{issue.shortId ?? issue.sentryIssueId}</span>
+                                <span class="project-incident-chip-muted">{issue.projectSlug}</span>
+                              </a>
+                            )}
+                          </For>
+                        </div>
+                      </div>
+
+                      <div class="project-incident-section">
+                        <p class="project-incident-section-label">Code references</p>
+                        <div class="project-incident-code-list">
+                          <For each={incident.codeRefs.slice(0, 4)}>
+                            {(codeRef) => (
+                              <div class="project-incident-code-item">
+                                <p class="project-incident-code-path">
+                                  {codeRef.githubRepoFullName ? `${codeRef.githubRepoFullName} · ` : ""}
+                                  {codeRef.path}
+                                  <Show when={codeRef.startLine}>
+                                    <span>
+                                      :{codeRef.startLine}
+                                      {codeRef.endLine && codeRef.endLine !== codeRef.startLine ? `-${codeRef.endLine}` : ""}
+                                    </span>
+                                  </Show>
+                                </p>
+                                <p class="project-incident-code-meta">
+                                  {codeRef.symbol ?? codeRef.source} · confidence {Math.round(codeRef.confidence * 100)}%
+                                </p>
+                              </div>
+                            )}
+                          </For>
+                          <Show when={incident.codeRefs.length === 0}>
+                            <p class="project-incident-empty-copy">
+                              No code references derived yet. The next pass can enrich these from exemplar stack frames.
+                            </p>
+                          </Show>
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                )}
+              </For>
+            </div>
+          </Show>
+        </Show>
+      </Show>
+    </div>
   );
 }
 
 function ProjectSettingsSection(props: {
   project: HotfixProject;
-  onRefreshStateChange: (refreshing: boolean) => void;
+  onHeaderLoadingChange: (active: boolean, label: string) => void;
   onRefreshSentryProjects: (projectId: string) => Promise<HotfixProject>;
   onUpdateSentryProjectSelection: (projectId: string, includedProjectIds: string[]) => Promise<void>;
 }) {
@@ -1884,7 +2139,7 @@ function ProjectSettingsSection(props: {
     if (autosaveTimeoutId !== undefined) {
       window.clearTimeout(autosaveTimeoutId);
     }
-    props.onRefreshStateChange(false);
+    props.onHeaderLoadingChange(false, "");
   });
 
   const refreshSelection = async () => {
@@ -1893,7 +2148,7 @@ function ProjectSettingsSection(props: {
     }
 
     setRefreshing(true);
-    props.onRefreshStateChange(true);
+    props.onHeaderLoadingChange(true, "Refreshing Sentry projects...");
     setSaveError(null);
 
     try {
@@ -1907,7 +2162,7 @@ function ProjectSettingsSection(props: {
       setSaveError(message);
     } finally {
       setRefreshing(false);
-      props.onRefreshStateChange(false);
+      props.onHeaderLoadingChange(false, "");
     }
   };
 
