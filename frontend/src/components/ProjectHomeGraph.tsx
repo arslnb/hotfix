@@ -808,15 +808,9 @@ async function mountProjectGraphEditor(
       return null;
     }
 
-    const holderRect = area.area.content.holder.getBoundingClientRect();
-    const card = view.element.querySelector<HTMLElement>("[data-node-id]");
-    const measuredElement = card ?? view.element;
-    const measuredRect = measuredElement.getBoundingClientRect();
-    const zoom = area.area.transform.k || 1;
-
     return {
-      x: (measuredRect.left - holderRect.left + measuredRect.width / 2) / zoom,
-      y: (measuredRect.top - holderRect.top + measuredRect.height / 2) / zoom,
+      x: view.position.x + GRAPH_CARD_WIDTH / 2,
+      y: view.position.y + GRAPH_CARD_HEIGHT / 2,
     };
   };
 
