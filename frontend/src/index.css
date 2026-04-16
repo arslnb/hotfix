@@ -1195,9 +1195,10 @@ button {
 }
 
 .project-home-canvas rete-node,
-.project-home-canvas [data-testid="node"] {
+.project-home-canvas [data-testid="node"],
+.project-home-canvas [data-node-id] {
   position: relative;
-  z-index: 2 !important;
+  z-index: 3 !important;
 }
 
 .project-home-canvas rete-connection-wrapper,
@@ -1392,6 +1393,8 @@ button {
   width: 15.5rem;
   overflow: hidden;
   position: relative;
+  isolation: isolate;
+  z-index: 3;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: #000;
@@ -1401,6 +1404,15 @@ button {
     border-color 150ms ease,
     background-color 150ms ease,
     transform 140ms ease;
+}
+
+.project-graph-node-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  background: #000;
 }
 
 .project-graph-node-card:hover {
@@ -1420,6 +1432,8 @@ button {
 }
 
 .project-graph-node-card-body {
+  position: relative;
+  z-index: 1;
   display: flex;
   min-height: 6.95rem;
   flex-direction: column;
@@ -1649,6 +1663,7 @@ button {
 
 .project-graph-node-card-footer {
   position: relative;
+  z-index: 1;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   height: 2.7rem;
   overflow: hidden;
