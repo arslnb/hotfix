@@ -1194,19 +1194,25 @@ button {
   background-position: -1px -1px;
 }
 
+.project-home-canvas rete-node,
 .project-home-canvas [data-testid="node"] {
-  z-index: 2;
+  position: relative;
+  z-index: 2 !important;
 }
 
-.project-home-canvas [data-testid="connection"] {
+.project-home-canvas rete-connection-wrapper,
+.project-home-canvas rete-connection,
+.project-home-canvas [data-testid="connection"],
+.project-home-canvas .project-graph-connection-svg {
+  position: relative;
   pointer-events: none;
-  z-index: 1;
+  z-index: 0 !important;
 }
 
 .project-home-link-preview {
   position: absolute;
   inset: 0;
-  z-index: 1;
+  z-index: 0;
   overflow: visible;
   pointer-events: none;
 }
@@ -1240,6 +1246,59 @@ button {
   padding: 2rem;
   pointer-events: none;
   z-index: 3;
+}
+
+.project-home-link-hint {
+  position: absolute;
+  top: 1rem;
+  left: 50%;
+  z-index: 4;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.16rem;
+  min-width: 0;
+  max-width: min(100% - 2rem, 22rem);
+  transform: translateX(-50%);
+  border: 1px solid rgba(127, 220, 255, 0.16);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.82);
+  padding: 0.7rem 0.82rem;
+  pointer-events: none;
+  text-align: center;
+}
+
+.project-home-link-hint-title,
+.project-home-link-hint-copy {
+  margin: 0;
+}
+
+.project-home-link-hint-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(164, 240, 255, 0.84);
+}
+
+.project-home-link-hint-copy {
+  font-size: 0.83rem;
+  color: rgba(242, 238, 227, 0.68);
+}
+
+.project-home-link-hint kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.35rem;
+  height: 1.2rem;
+  margin: 0 0.14rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 0 0.36rem;
+  font-family: "Geist Mono", monospace;
+  font-size: 0.74rem;
+  color: rgba(242, 238, 227, 0.74);
 }
 
 .project-home-controls {
@@ -1472,6 +1531,20 @@ button {
   border-color: rgba(127, 220, 255, 0.58);
   background: rgba(127, 220, 255, 0.085);
   color: rgba(164, 240, 255, 0.94);
+}
+
+.project-graph-node-connect-handle.is-active {
+  border-color: rgba(127, 220, 255, 0.64);
+  background: rgba(127, 220, 255, 0.12);
+  color: rgba(164, 240, 255, 0.96);
+}
+
+.project-graph-node-connect-handle.is-disabled,
+.project-graph-node-connect-handle:disabled {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(242, 238, 227, 0.22);
+  cursor: not-allowed;
 }
 
 .project-graph-node-connect-handle:focus-visible {

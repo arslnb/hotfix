@@ -855,6 +855,15 @@ async function mountProjectGraphEditor(
       const nodeId = card.dataset.nodeId ?? null;
       card.classList.toggle("is-selected", nodeId === state.selectedNodeId);
       card.classList.toggle("is-link-source", nodeId === state.linkSourceNodeId);
+
+      const connectButton = card.querySelector<HTMLButtonElement>("[data-node-connect-handle]");
+      if (connectButton) {
+        const isOtherConnectorArmed =
+          Boolean(state.linkSourceNodeId) && state.linkSourceNodeId !== nodeId;
+        connectButton.disabled = isOtherConnectorArmed;
+        connectButton.classList.toggle("is-disabled", isOtherConnectorArmed);
+        connectButton.classList.toggle("is-active", nodeId === state.linkSourceNodeId);
+      }
     }
   };
 
@@ -1792,6 +1801,15 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
               <path class="project-home-link-preview-path" d={path()} />
             </svg>
           )}
+        </Show>
+
+        <Show when={linkSourceNodeId() && !edgeDraft()}>
+          <div class="project-home-link-hint" role="status" aria-live="polite">
+            <p class="project-home-link-hint-title">Connecting projects</p>
+            <p class="project-home-link-hint-copy">
+              Click another card to connect it. Press <kbd>Esc</kbd> to cancel.
+            </p>
+          </div>
         </Show>
 
         <GraphControls
