@@ -233,15 +233,11 @@ function buildSnappyConnectorPath(
   start: { x: number; y: number },
   end: { x: number; y: number },
 ) {
-  const minimumChannel = 22;
-  const minimumForwardGap = 54;
+  const lead = 18;
+  const deltaX = end.x - start.x;
+  const midpointOffset = clamp(deltaX / 2, -40, 40);
+  const trunkX = start.x + (Math.abs(deltaX) > lead * 2 ? midpointOffset : (deltaX >= 0 ? lead : -lead));
 
-  if (end.x >= start.x + minimumForwardGap) {
-    const trunkX = start.x + Math.max(minimumChannel, (end.x - start.x) / 2);
-    return `M ${start.x} ${start.y} L ${trunkX} ${start.y} L ${trunkX} ${end.y} L ${end.x} ${end.y}`;
-  }
-
-  const trunkX = Math.max(start.x, end.x) + minimumChannel;
   return `M ${start.x} ${start.y} L ${trunkX} ${start.y} L ${trunkX} ${end.y} L ${end.x} ${end.y}`;
 }
 
