@@ -117,15 +117,10 @@ type CreateProjectGraphEdgeInput = {
 
 type GraphVisualState = {
   selectedNodeId: string | null;
+  linkSourceNodeId: string | null;
 };
 
 type EdgeDraft = CreateProjectGraphEdgeInput;
-
-type PendingConnectionDraft = {
-  connectionId: string;
-  sourceNodeId: string;
-  targetNodeId: string;
-};
 
 type ProjectHomeGraphProps = {
   projectId: string;
@@ -152,7 +147,6 @@ type EditorHandle = {
   setVisualState: (state: GraphVisualState) => void;
   fitToView: (scale?: number) => Promise<void>;
   zoomBy: (multiplier: number) => Promise<void>;
-  removeConnection: (connectionId: string) => Promise<void>;
 };
 
 async function fetchJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
@@ -606,20 +600,12 @@ async function mountProjectGraphEditor(
   graph: ProjectGraphPayload,
   onLayoutChange: (nodes: ProjectGraphLayoutNode[]) => Promise<void>,
   onNodeActivate: (nodeId: string | null) => void,
-  onConnectionDraft: (draft: PendingConnectionDraft) => void,
 ): Promise<EditorHandle> {
-  const [
-    { NodeEditor, ClassicPreset },
-    { AreaPlugin, AreaExtensions },
-    { LitPlugin, Presets: LitPresets },
-    { ConnectionPlugin, Presets: ConnectionPresets },
-    { html },
-  ] =
+  const [{ NodeEditor, ClassicPreset }, { AreaPlugin, AreaExtensions }, { LitPlugin, Presets: LitPresets }, { html }] =
     await Promise.all([
       import("rete"),
       import("rete-area-plugin"),
       import("@retejs/lit-plugin"),
-      import("rete-connection-plugin"),
       import("lit"),
     ]);
 
@@ -628,24 +614,12 @@ async function mountProjectGraphEditor(
   const editor = new NodeEditor<any>();
   const area = new AreaPlugin<any>(container);
   const render = new LitPlugin<any>();
-  const connection = new ConnectionPlugin<any>();
   const resizeObserver = new ResizeObserver(() => {
     void area.area.translate(area.area.transform.x, area.area.transform.y);
   });
 
   editor.use(area);
-  area.use(connection as any);
   area.use(render);
-  connection.addPreset(ConnectionPresets.classic.setup());
-  connection.addPipe((context: any) => {
-    if (context.type === "connectionpick") {
-      container.classList.add("is-connecting");
-    } else if (context.type === "connectiondrop") {
-      container.classList.remove("is-connecting");
-    }
-
-    return context;
-  });
   AreaExtensions.restrictor(area, {
     scaling: {
       min: GRAPH_ZOOM_MIN,
@@ -697,6 +671,14 @@ async function mountProjectGraphEditor(
                 data-node-id=${node.id}
                 aria-label=${node.label}
               >
+                <span class="project-graph-node-socket-anchor is-input" aria-hidden="true">
+                  <rete-ref .data=${inputSocketData} .emit=${emit}></rete-ref>
+                </span>
+
+                <span class="project-graph-node-socket-anchor is-output" aria-hidden="true">
+                  <rete-ref .data=${outputSocketData} .emit=${emit}></rete-ref>
+                </span>
+
                 <div class="project-graph-node-card-body">
                   <div class="project-graph-node-card-top">
                     <div class="project-graph-node-card-header">
@@ -723,7 +705,14 @@ async function mountProjectGraphEditor(
                         <span></span>
                       </button>
 
-                      <span class="project-graph-node-connect-handle" aria-hidden="true">
+                      <button
+                        class="project-graph-node-connect-handle"
+                        type="button"
+                        tabindex="-1"
+                        data-node-connect-handle
+                        data-node-id=${node.id}
+                        aria-label=${`Start connection from ${node.label}`}
+                      >
                         <span class="project-graph-node-connect-icon" aria-hidden="true">
                           <svg viewBox="0 0 16 16" fill="none">
                             <path d="M4.25 8h7.5" />
@@ -732,13 +721,7 @@ async function mountProjectGraphEditor(
                             <path d="M12.25 3.75h-1.75V5.5h1.75z" />
                           </svg>
                         </span>
-                        <span class="project-graph-node-socket-anchor is-input">
-                          <rete-ref .data=${inputSocketData} .emit=${emit}></rete-ref>
-                        </span>
-                        <span class="project-graph-node-socket-anchor is-output">
-                          <rete-ref .data=${outputSocketData} .emit=${emit}></rete-ref>
-                        </span>
-                      </span>
+                      </button>
                     </div>
                   </div>
 
@@ -778,9 +761,6 @@ async function mountProjectGraphEditor(
             html`
               <span
                 class="project-graph-socket project-graph-socket--${context.side}"
-                data-node-socket
-                data-node-id=${context.nodeId}
-                data-socket-side=${context.side}
                 aria-hidden="true"
               ></span>
             `;
@@ -843,35 +823,6 @@ async function mountProjectGraphEditor(
     }
   }
 
-  let hydratingConnections = true;
-
-  editor.addPipe((context: any) => {
-    if (context.type === "connectioncreated") {
-      const nextConnection = context.data as {
-        id: string;
-        source: string;
-        target: string;
-        isPseudo?: boolean;
-      };
-
-      if (!hydratingConnections && !nextConnection.isPseudo) {
-        window.queueMicrotask(() => {
-          if (!editor.getConnection(nextConnection.id)) {
-            return;
-          }
-
-          onConnectionDraft({
-            connectionId: nextConnection.id,
-            sourceNodeId: nextConnection.source,
-            targetNodeId: nextConnection.target,
-          });
-        });
-      }
-    }
-
-    return context;
-  });
-
   const nodesById = new Map<string, ProjectGraphNodeInstance>();
   for (const node of graph.nodes) {
     const nextNode = new ProjectGraphNodeInstance(node);
@@ -891,7 +842,6 @@ async function mountProjectGraphEditor(
     connection.id = edge.id;
     await editor.addConnection(connection);
   }
-  hydratingConnections = false;
 
   if (nodesById.size > 0) {
     await AreaExtensions.zoomAt(area, Array.from(nodesById.values()) as any[], {
@@ -904,6 +854,7 @@ async function mountProjectGraphEditor(
     for (const card of nodeCards) {
       const nodeId = card.dataset.nodeId ?? null;
       card.classList.toggle("is-selected", nodeId === state.selectedNodeId);
+      card.classList.toggle("is-link-source", nodeId === state.linkSourceNodeId);
     }
   };
 
@@ -928,14 +879,6 @@ async function mountProjectGraphEditor(
 
     const card = target.closest<HTMLElement>("[data-node-id]");
     if (!card?.dataset.nodeId) {
-      return;
-    }
-
-    if (target.closest("[data-node-socket]")) {
-      pointerCandidate = null;
-      activePointerNodeId = null;
-      draggedNodeId = null;
-      translatedDuringPointer = false;
       return;
     }
 
@@ -993,7 +936,15 @@ async function mountProjectGraphEditor(
       return;
     }
 
-    if (target.closest(GRAPH_DRAG_HANDLE_SELECTOR) || target.closest("[data-node-socket]")) {
+    const connectHandle = target.closest<HTMLElement>("[data-node-connect-handle]");
+    if (connectHandle?.dataset.nodeId) {
+      event.preventDefault();
+      event.stopPropagation();
+      onNodeActivate(`connect:${connectHandle.dataset.nodeId}`);
+      return;
+    }
+
+    if (target.closest(GRAPH_DRAG_HANDLE_SELECTOR)) {
       return;
     }
 
@@ -1071,7 +1022,6 @@ async function mountProjectGraphEditor(
       window.removeEventListener("pointerup", clearPointerTracking, true);
       window.removeEventListener("pointercancel", clearPointerTracking, true);
       resizeObserver.disconnect();
-      container.classList.remove("is-connecting");
       area.destroy();
       container.replaceChildren();
     },
@@ -1099,13 +1049,6 @@ async function mountProjectGraphEditor(
       }
 
       await area.area.zoom(nextZoom, offsetX, offsetY);
-    },
-    async removeConnection(connectionId: string) {
-      if (!editor.getConnection(connectionId)) {
-        return;
-      }
-
-      await editor.removeConnection(connectionId);
     },
   };
 }
@@ -1458,7 +1401,8 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
     async () => fetchProjectGraph(props.projectId),
   );
   const [selectedNodeId, setSelectedNodeId] = createSignal<string | null>(null);
-  const [pendingEdgeConnectionId, setPendingEdgeConnectionId] = createSignal<string | null>(null);
+  const [linkSourceNodeId, setLinkSourceNodeId] = createSignal<string | null>(null);
+  const [linkPreviewPoint, setLinkPreviewPoint] = createSignal<{ x: number; y: number } | null>(null);
   const [edgeDraft, setEdgeDraft] = createSignal<EdgeDraft | null>(null);
   const [edgeSaveError, setEdgeSaveError] = createSignal<string | null>(null);
   const [edgeSaving, setEdgeSaving] = createSignal(false);
@@ -1496,9 +1440,44 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
     return payload ? normalizeGraphLayout(payload) : null;
   });
 
+  const resolveNodeCenter = (nodeId: string) => {
+    const container = containerRef;
+    if (!container) {
+      return null;
+    }
+
+    const card = container.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(nodeId)}"]`);
+    if (!card) {
+      return null;
+    }
+
+    const containerRect = container.getBoundingClientRect();
+    const cardRect = card.getBoundingClientRect();
+    return {
+      x: cardRect.left - containerRect.left + cardRect.width / 2,
+      y: cardRect.top - containerRect.top + cardRect.height / 2,
+    };
+  };
+
+  const previewPath = createMemo(() => {
+    const sourceNodeId = linkSourceNodeId();
+    const pointer = linkPreviewPoint();
+    if (!sourceNodeId || !pointer || edgeDraft()) {
+      return null;
+    }
+
+    const sourceCenter = resolveNodeCenter(sourceNodeId);
+    if (!sourceCenter) {
+      return null;
+    }
+
+    return buildSnappyConnectorPath(sourceCenter, pointer);
+  });
+
   const applyEditorVisualState = () => {
     editorHandle?.setVisualState({
       selectedNodeId: selectedNodeId(),
+      linkSourceNodeId: linkSourceNodeId(),
     });
   };
 
@@ -1508,29 +1487,28 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
     setEdgeSaving(false);
   };
 
-  const removePendingEdgeConnection = async () => {
-    const connectionId = pendingEdgeConnectionId();
-    setPendingEdgeConnectionId(null);
-
-    if (!connectionId) {
-      return;
-    }
-
-    try {
-      await editorHandle?.removeConnection(connectionId);
-    } catch (error) {
-      console.error("Could not remove draft graph connection", error);
-    }
+  const clearLinkSourceSelection = () => {
+    setLinkSourceNodeId(null);
+    setLinkPreviewPoint(null);
   };
 
-  const closeEdgeComposer = (options?: { removeConnection?: boolean }) => {
+  const closeEdgeComposer = () => {
     resetEdgeComposerState();
-    if (options?.removeConnection === false) {
-      setPendingEdgeConnectionId(null);
+  };
+
+  const armLinkSource = (nodeId: string) => {
+    if (linkSourceNodeId() === nodeId) {
+      clearLinkSourceSelection();
+      applyEditorVisualState();
       return;
     }
 
-    void removePendingEdgeConnection();
+    const center = resolveNodeCenter(nodeId);
+    setSelectedNodeId(null);
+    setLinkSourceNodeId(nodeId);
+    setLinkPreviewPoint(center ? { x: center.x + 24, y: center.y } : null);
+    resetEdgeComposerState();
+    applyEditorVisualState();
   };
 
   const reorganizeGraph = async () => {
@@ -1560,26 +1538,26 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
       return;
     }
 
-    setSelectedNodeId(nodeId);
-  };
-
-  const handleConnectionDraft = (draft: PendingConnectionDraft) => {
-    if (draft.sourceNodeId === draft.targetNodeId) {
-      void editorHandle?.removeConnection(draft.connectionId);
+    if (nodeId.startsWith("connect:")) {
+      armLinkSource(nodeId.slice("connect:".length));
       return;
     }
 
-    const previousConnectionId = pendingEdgeConnectionId();
-    if (previousConnectionId && previousConnectionId !== draft.connectionId) {
-      void editorHandle?.removeConnection(previousConnectionId);
+    const sourceNodeId = linkSourceNodeId();
+    if (sourceNodeId) {
+      if (sourceNodeId === nodeId) {
+        return;
+      }
+
+      setEdgeSaveError(null);
+      setEdgeSaving(false);
+      setEdgeDraft(createDefaultEdgeDraft(sourceNodeId, nodeId));
+      clearLinkSourceSelection();
+      applyEditorVisualState();
+      return;
     }
 
-    setSelectedNodeId(null);
-    setPendingEdgeConnectionId(draft.connectionId);
-    setEdgeSaveError(null);
-    setEdgeSaving(false);
-    setEdgeDraft(createDefaultEdgeDraft(draft.sourceNodeId, draft.targetNodeId));
-    applyEditorVisualState();
+    setSelectedNodeId(nodeId);
   };
 
   const handleEdgeSave = async () => {
@@ -1595,9 +1573,7 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
       const payload = await createProjectGraphEdge(props.projectId, draft);
       mutate(payload);
       setSelectedNodeId(null);
-      closeEdgeComposer({
-        removeConnection: false,
-      });
+      closeEdgeComposer();
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Could not save the relationship edge.";
@@ -1617,6 +1593,10 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
       setSelectedNodeId(null);
     }
 
+    if (linkSourceNodeId() && !payload.nodes.some((node) => node.id === linkSourceNodeId())) {
+      clearLinkSourceSelection();
+    }
+
     const draft = edgeDraft();
     if (
       draft &&
@@ -1624,7 +1604,6 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
         !payload.nodes.some((node) => node.id === draft.targetNodeId))
     ) {
       resetEdgeComposerState();
-      setPendingEdgeConnectionId(null);
     }
   });
 
@@ -1651,6 +1630,7 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
       await handle.fitToView(panelOpen ? GRAPH_PANEL_FIT_SCALE : GRAPH_DEFAULT_FIT_SCALE);
       handle.setVisualState({
         selectedNodeId: selectedNodeId(),
+        linkSourceNodeId: linkSourceNodeId(),
       });
     })();
 
@@ -1711,7 +1691,6 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
           }
         },
         handleNodeActivate,
-        handleConnectionDraft,
       );
 
       if (disposed || currentBuild !== buildToken) {
@@ -1725,11 +1704,33 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
       );
       handle.setVisualState({
         selectedNodeId: untrack(() => selectedNodeId()),
+        linkSourceNodeId: untrack(() => linkSourceNodeId()),
       });
     })();
 
     onCleanup(() => {
       disposed = true;
+    });
+  });
+
+  createEffect(() => {
+    const handlePointerMove = (event: PointerEvent) => {
+      const sourceNodeId = linkSourceNodeId();
+      const container = containerRef;
+      if (!sourceNodeId || !container || edgeDraft()) {
+        return;
+      }
+
+      const rect = container.getBoundingClientRect();
+      setLinkPreviewPoint({
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      });
+    };
+
+    window.addEventListener("pointermove", handlePointerMove, true);
+    onCleanup(() => {
+      window.removeEventListener("pointermove", handlePointerMove, true);
     });
   });
 
@@ -1744,6 +1745,15 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
         event.stopPropagation();
         event.stopImmediatePropagation();
         closeEdgeComposer();
+        return;
+      }
+
+      if (linkSourceNodeId()) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        clearLinkSourceSelection();
+        applyEditorVisualState();
         return;
       }
 
@@ -1771,10 +1781,18 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
   return (
     <section
       class="project-home-shell"
-      classList={{ "has-panel": hasPanel() }}
+      classList={{ "has-panel": hasPanel(), "is-link-armed": Boolean(linkSourceNodeId()) }}
     >
       <div class="project-home-stage">
         <div ref={containerRef} class="project-home-canvas" />
+
+        <Show when={previewPath()}>
+          {(path) => (
+            <svg class="project-home-link-preview" aria-hidden="true">
+              <path class="project-home-link-preview-path" d={path()} />
+            </svg>
+          )}
+        </Show>
 
         <GraphControls
           onReorganize={() => void reorganizeGraph()}

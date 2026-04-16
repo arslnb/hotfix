@@ -1194,8 +1194,41 @@ button {
   background-position: -1px -1px;
 }
 
+.project-home-canvas [data-testid="node"] {
+  z-index: 2;
+}
+
 .project-home-canvas [data-testid="connection"] {
   pointer-events: none;
+  z-index: 1;
+}
+
+.project-home-link-preview {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.project-home-link-preview-path {
+  fill: none;
+  stroke: rgba(127, 220, 255, 0.84);
+  stroke-width: 1.55;
+  stroke-linecap: round;
+  stroke-dasharray: 4 8;
+  vector-effect: non-scaling-stroke;
+  animation: project-link-preview-dash 1.05s linear infinite;
+}
+
+@keyframes project-link-preview-dash {
+  from {
+    stroke-dashoffset: 0;
+  }
+
+  to {
+    stroke-dashoffset: -24;
+  }
 }
 
 .project-home-overlay {
@@ -1322,6 +1355,11 @@ button {
   background: #050709;
 }
 
+.project-graph-node-card.is-link-source {
+  border-color: rgba(127, 220, 255, 0.78);
+  background: #050709;
+}
+
 .project-graph-node-card-body {
   display: flex;
   min-height: 6.95rem;
@@ -1426,12 +1464,25 @@ button {
     border-color 150ms ease,
     background-color 150ms ease,
     color 150ms ease;
+  cursor: crosshair;
+  z-index: 3;
 }
 
 .project-graph-node-connect-handle:hover {
   border-color: rgba(127, 220, 255, 0.58);
   background: rgba(127, 220, 255, 0.085);
   color: rgba(164, 240, 255, 0.94);
+}
+
+.project-graph-node-connect-handle:focus-visible {
+  outline: none;
+  border-color: rgba(127, 220, 255, 0.64);
+  background: rgba(127, 220, 255, 0.1);
+}
+
+.project-home-shell.is-link-armed .project-graph-node-connect-handle {
+  border-color: rgba(127, 220, 255, 0.58);
+  color: rgba(164, 240, 255, 0.92);
 }
 
 .project-graph-node-connect-icon {
@@ -1454,28 +1505,15 @@ button {
 .project-graph-node-socket-anchor {
   position: absolute;
   inset: 0;
+  z-index: 0;
+  pointer-events: none;
 }
 
 .project-graph-node-socket-anchor > rete-ref {
   display: block;
   width: 100%;
   height: 100%;
-}
-
-.project-home-canvas .project-graph-node-socket-anchor.is-input {
-  z-index: 1;
-}
-
-.project-home-canvas .project-graph-node-socket-anchor.is-output {
-  z-index: 2;
-}
-
-.project-home-canvas.is-connecting .project-graph-node-socket-anchor.is-input {
-  z-index: 3;
-}
-
-.project-home-canvas.is-connecting .project-graph-node-socket-anchor.is-output {
-  z-index: 1;
+  pointer-events: none;
 }
 
 .project-graph-socket {
@@ -1484,8 +1522,8 @@ button {
   inset: 0;
   width: 100%;
   height: 100%;
-  cursor: crosshair;
   opacity: 0;
+  pointer-events: none;
 }
 
 .project-graph-node-card-title,
