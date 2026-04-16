@@ -1194,6 +1194,33 @@ button {
   background-position: -1px -1px;
 }
 
+.project-graph-background-svg {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.project-graph-background-path {
+  fill: none;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.project-graph-background-path.is-system {
+  stroke: rgba(255, 255, 255, 0.18);
+  stroke-width: 1.2;
+}
+
+.project-graph-background-path.is-relationship {
+  stroke: rgba(127, 220, 255, 0.84);
+  stroke-width: 1.55;
+  stroke-dasharray: 4 8;
+  animation: project-link-preview-dash 1.05s linear infinite;
+}
+
 .project-home-canvas rete-node,
 .project-home-canvas [data-testid="node"],
 .project-home-canvas [data-node-id] {

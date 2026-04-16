@@ -627,7 +627,10 @@ async function mountProjectGraphEditor(
     },
   });
 
-  const edgesById = new Map(graph.edges.map((edge) => [edge.id, edge]));
+  const svgNamespace = "http://www.w3.org/2000/svg";
+  const backgroundSvg = document.createElementNS(svgNamespace, "svg");
+  backgroundSvg.classList.add("project-graph-background-svg");
+  const backgroundPaths = new Map<string, SVGPathElement>();
 
   render.addPipe((context: any) => {
     if (context.type === "connectionpath") {
@@ -765,40 +768,6 @@ async function mountProjectGraphEditor(
               ></span>
             `;
         },
-        connection(context) {
-          const edge = edgesById.get(context.payload.id);
-          return ({ path }) =>
-            html`
-              <svg
-                class="project-graph-connection-svg"
-                data-edge-id=${context.payload.id}
-                style="overflow: visible !important; position: absolute; pointer-events: none; width: 9999px; height: 9999px;"
-              >
-                <path
-                  class="project-graph-connection-path ${edge?.isSystem ? "is-system" : "is-relationship"}"
-                  d=${path}
-                  fill="none"
-                  stroke=${edge?.isSystem ? "rgba(255, 255, 255, 0.18)" : "rgba(127, 220, 255, 0.84)"}
-                  stroke-width=${edge?.isSystem ? "1.2" : "1.55"}
-                  stroke-linecap="round"
-                  stroke-dasharray=${edge?.isSystem ? "0" : "4 8"}
-                  vector-effect="non-scaling-stroke"
-                  pointer-events="none"
-                >
-                  ${edge?.isSystem
-                    ? null
-                    : html`
-                        <animate
-                          attributeName="stroke-dashoffset"
-                          values="0;-24"
-                          dur="1.05s"
-                          repeatCount="indefinite"
-                        />
-                      `}
-                </path>
-              </svg>
-            `;
-        },
       },
     }) as any,
   );
@@ -831,17 +800,49 @@ async function mountProjectGraphEditor(
     await area.translate(nextNode.id, { x: node.positionX, y: node.positionY });
   }
 
-  for (const edge of graph.edges) {
-    const source = nodesById.get(edge.sourceNodeId);
-    const target = nodesById.get(edge.targetNodeId);
-    if (!source || !target) {
-      continue;
+  area.area.content.holder.insertBefore(backgroundSvg, area.area.content.holder.firstChild);
+
+  const nodeCenterFromView = (nodeId: string) => {
+    const view = area.nodeViews.get(nodeId);
+    if (!view) {
+      return null;
     }
 
-    const connection = new ClassicPreset.Connection(source, "out", target, "in");
-    connection.id = edge.id;
-    await editor.addConnection(connection);
-  }
+    return {
+      x: view.position.x + GRAPH_CARD_WIDTH / 2,
+      y: view.position.y + GRAPH_CARD_HEIGHT / 2,
+    };
+  };
+
+  const updateBackgroundPath = (edge: ProjectGraphEdge) => {
+    const sourceCenter = nodeCenterFromView(edge.sourceNodeId);
+    const targetCenter = nodeCenterFromView(edge.targetNodeId);
+    if (!sourceCenter || !targetCenter) {
+      return;
+    }
+
+    let pathElement = backgroundPaths.get(edge.id);
+    if (!pathElement) {
+      pathElement = document.createElementNS(svgNamespace, "path");
+      pathElement.classList.add(
+        "project-graph-background-path",
+        edge.isSystem ? "is-system" : "is-relationship",
+      );
+      pathElement.setAttribute("vector-effect", "non-scaling-stroke");
+      backgroundSvg.appendChild(pathElement);
+      backgroundPaths.set(edge.id, pathElement);
+    }
+
+    pathElement.setAttribute("d", buildSnappyConnectorPath(sourceCenter, targetCenter));
+  };
+
+  const updateBackgroundPaths = () => {
+    for (const edge of graph.edges) {
+      updateBackgroundPath(edge);
+    }
+  };
+
+  updateBackgroundPaths();
 
   if (nodesById.size > 0) {
     await AreaExtensions.zoomAt(area, Array.from(nodesById.values()) as any[], {
@@ -1007,6 +1008,12 @@ async function mountProjectGraphEditor(
         positionY: context.data.position.y,
       });
 
+      for (const edge of graph.edges) {
+        if (edge.sourceNodeId === context.data.id || edge.targetNodeId === context.data.id) {
+          updateBackgroundPath(edge);
+        }
+      }
+
       if (saveTimeoutId !== undefined) {
         window.clearTimeout(saveTimeoutId);
       }
@@ -1031,6 +1038,8 @@ async function mountProjectGraphEditor(
       window.removeEventListener("pointerup", clearPointerTracking, true);
       window.removeEventListener("pointercancel", clearPointerTracking, true);
       resizeObserver.disconnect();
+      backgroundSvg.remove();
+      backgroundPaths.clear();
       area.destroy();
       container.replaceChildren();
     },
