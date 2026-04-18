@@ -3374,6 +3374,7 @@ function ProjectSparkline(props: { seed: string; compact: boolean }) {
       class="project-sparkline"
       viewBox={`0 0 ${width()} ${height()}`}
       preserveAspectRatio="none"
+      shape-rendering="geometricPrecision"
       aria-hidden="true"
     >
       <defs>
@@ -3395,6 +3396,7 @@ function ProjectSparkline(props: { seed: string; compact: boolean }) {
         stroke-width={props.compact ? "1.8" : "2.1"}
         stroke-linecap="round"
         stroke-linejoin="round"
+        vector-effect="non-scaling-stroke"
       />
     </svg>
   );
