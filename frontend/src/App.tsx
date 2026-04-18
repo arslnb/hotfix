@@ -1649,16 +1649,7 @@ function ProjectsTab(props: {
                           >
                             <span>Name</span>
                           </button>
-                          <div class="projects-table-header-label">Connections</div>
                           <div class="projects-table-header-label">Health</div>
-                          <button
-                            class="projects-table-header-button"
-                            classList={{ "is-active": sortBy() === "items" }}
-                            type="button"
-                            onClick={() => setSortBy("items")}
-                          >
-                            <span>Items</span>
-                          </button>
                           <button
                             class="projects-table-header-button"
                             classList={{ "is-active": sortBy() === "indexing" }}
@@ -1713,27 +1704,26 @@ function ProjectsTab(props: {
                                   onClick={() => openProject(project.id)}
                                 >
                                   <div class="project-card-cell project-card-cell--name">
-                                    <h2 class="project-card-title">{project.name}</h2>
-                                  </div>
-
-                                  <div class="project-card-cell project-card-cell--connections">
-                                    <div class="project-connection-icons">
-                                      <Show when={project.githubConnected}>
-                                        <img
-                                          class="project-connection-icon"
-                                          src={githubIcon}
-                                          alt="GitHub connected"
-                                          title="GitHub connected"
-                                        />
-                                      </Show>
-                                      <Show when={project.sentryConnected}>
-                                        <img
-                                          class="project-connection-icon"
-                                          src={sentryIcon}
-                                          alt="Sentry connected"
-                                          title="Sentry connected"
-                                        />
-                                      </Show>
+                                    <div class="project-card-title-row">
+                                      <h2 class="project-card-title">{project.name}</h2>
+                                      <div class="project-connection-icons">
+                                        <Show when={project.githubConnected}>
+                                          <img
+                                            class="project-connection-icon"
+                                            src={githubIcon}
+                                            alt="GitHub connected"
+                                            title="GitHub connected"
+                                          />
+                                        </Show>
+                                        <Show when={project.sentryConnected}>
+                                          <img
+                                            class="project-connection-icon"
+                                            src={sentryIcon}
+                                            alt="Sentry connected"
+                                            title="Sentry connected"
+                                          />
+                                        </Show>
+                                      </div>
                                     </div>
                                   </div>
 
@@ -1746,10 +1736,6 @@ function ProjectsTab(props: {
                                         </span>
                                       );
                                     })()}
-                                  </div>
-
-                                  <div class="project-card-cell project-card-cell--items">
-                                    <p class="project-card-meta">{project.itemsCount}</p>
                                   </div>
 
                                   <div class="project-card-cell project-card-cell--indexing">
@@ -2157,9 +2143,7 @@ function ProjectsHomeSkeleton(props: { viewMode: ProjectsView }) {
             <div class="projects-table">
               <div class="projects-table-header is-skeleton" role="row">
                 <div class="projects-table-header-label">Name</div>
-                <div class="projects-table-header-label">Connections</div>
                 <div class="projects-table-header-label">Health</div>
-                <div class="projects-table-header-label">Items</div>
                 <div class="projects-table-header-label">Indexing</div>
                 <div class="projects-table-header-label">Incidents</div>
                 <div class="projects-table-header-label">Last activity</div>
@@ -2174,19 +2158,16 @@ function ProjectsHomeSkeleton(props: { viewMode: ProjectsView }) {
                     <article class="project-card is-table-row is-skeleton">
                       <div class="project-card-main">
                         <div class="project-card-cell project-card-cell--name">
-                          <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--name" />
-                        </div>
-                        <div class="project-card-cell project-card-cell--connections">
-                          <div class="projects-skeleton-inline-icons">
-                            <span class="projects-skeleton-icon" />
-                            <span class="projects-skeleton-icon" />
+                          <div class="project-card-title-row">
+                            <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--name" />
+                            <div class="projects-skeleton-inline-icons">
+                              <span class="projects-skeleton-icon" />
+                              <span class="projects-skeleton-icon" />
+                            </div>
                           </div>
                         </div>
                         <div class="project-card-cell project-card-cell--health">
                           <div class="projects-skeleton-pill" />
-                        </div>
-                        <div class="project-card-cell project-card-cell--items">
-                          <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--tiny" />
                         </div>
                         <div class="project-card-cell project-card-cell--indexing">
                           <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--medium" />
