@@ -658,6 +658,8 @@ button {
 }
 
 .projects-account-menu {
+  display: inline-flex;
+  align-items: center;
   position: relative;
 }
 
@@ -665,6 +667,7 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  align-self: center;
   box-sizing: border-box;
   width: 28px;
   height: 28px;
@@ -704,6 +707,7 @@ button {
 }
 
 .projects-account-avatar {
+  display: block;
   object-fit: cover;
 }
 
@@ -1082,11 +1086,11 @@ button {
 
 .projects-table-row.is-filler td {
   background: transparent !important;
-  border-bottom-color: rgba(255, 255, 255, calc(0.08 * var(--filler-opacity, 1)));
+  border-bottom-color: rgba(255, 255, 255, calc(0.048 * var(--filler-opacity, 1)));
 }
 
 .projects-table-row.is-filler td + td {
-  border-left-color: rgba(255, 255, 255, calc(0.09 * var(--filler-opacity, 1)));
+  border-left-color: rgba(255, 255, 255, calc(0.054 * var(--filler-opacity, 1)));
 }
 
 .projects-table-cell {
@@ -1106,6 +1110,7 @@ button {
   padding: 0;
   width: 2.7rem;
   text-align: center;
+  vertical-align: middle;
 }
 
 .projects-toolbar-meta {
@@ -1455,10 +1460,16 @@ button {
 .project-card-stats.is-inline {
   display: flex;
   align-items: center;
-  justify-content: stretch;
+  justify-content: center;
   min-width: 0;
   width: 100%;
   height: 100%;
+}
+
+.projects-table-cell--activity .project-card-stats.is-inline {
+  width: 100%;
+  min-width: 100%;
+  height: 32px;
 }
 
 .project-connection-icons {
@@ -1530,10 +1541,9 @@ button {
 .projects-table-cell--actions .project-card-menu {
   position: relative;
   width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
+  display: grid;
+  place-items: center;
+  height: 32px;
   min-height: 32px;
 }
 
@@ -1552,7 +1562,7 @@ button {
   transition:
     background-color 150ms ease,
     color 150ms ease;
-  margin-inline: auto;
+  margin: 0;
 }
 
 .project-card-menu-trigger:hover,
@@ -1665,6 +1675,13 @@ button {
   margin: 0;
   align-self: center;
   flex: 1 1 auto;
+}
+
+.projects-table-cell--activity .project-sparkline {
+  display: block;
+  width: 100%;
+  min-width: 100%;
+  max-width: none;
 }
 
 .project-card.is-grid .project-sparkline {
