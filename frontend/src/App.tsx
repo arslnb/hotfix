@@ -1608,7 +1608,6 @@ function ProjectsTab(props: {
                     </div>
                   </div>
                 </div>
-                <div class="projects-header-rule" aria-hidden="true" />
               </div>
 
               <Show
@@ -2201,7 +2200,6 @@ function ProjectsHomeSkeleton(props: { viewMode: ProjectsView }) {
             <div class="projects-skeleton-button projects-skeleton-button--avatar" />
           </div>
         </div>
-        <div class="projects-header-rule" aria-hidden="true" />
       </div>
 
       <Show
