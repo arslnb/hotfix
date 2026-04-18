@@ -813,11 +813,11 @@ button {
   flex-direction: column;
   align-items: center;
   gap: 1px;
-  color: rgba(127, 220, 255, 0.34);
+  color: rgba(127, 220, 255, 0.48);
   font-family: "Geist Mono", ui-monospace, "SFMono-Regular", "SF Mono", monospace;
   font-weight: 500;
   line-height: 0.82;
-  text-shadow: 0 0 10px rgba(127, 220, 255, 0.08);
+  text-shadow: 0 0 10px rgba(127, 220, 255, 0.12);
 }
 
 .projects-matrix-char {
@@ -825,23 +825,23 @@ button {
 }
 
 .projects-matrix-char.is-green {
-  color: rgba(125, 232, 168, 0.48);
-  text-shadow: 0 0 10px rgba(125, 232, 168, 0.12);
+  color: rgba(130, 255, 184, 0.76);
+  text-shadow: 0 0 12px rgba(130, 255, 184, 0.2);
 }
 
 .projects-matrix-char.is-amber {
-  color: rgba(255, 204, 116, 0.46);
-  text-shadow: 0 0 10px rgba(255, 204, 116, 0.1);
+  color: rgba(255, 214, 124, 0.74);
+  text-shadow: 0 0 12px rgba(255, 214, 124, 0.18);
 }
 
 .projects-matrix-char.is-violet {
-  color: rgba(193, 164, 255, 0.44);
-  text-shadow: 0 0 10px rgba(193, 164, 255, 0.1);
+  color: rgba(206, 174, 255, 0.74);
+  text-shadow: 0 0 12px rgba(206, 174, 255, 0.18);
 }
 
 .projects-matrix-char.is-bright {
-  color: rgba(164, 240, 255, 0.72);
-  text-shadow: 0 0 12px rgba(127, 220, 255, 0.22);
+  color: rgba(188, 245, 255, 0.92);
+  text-shadow: 0 0 14px rgba(127, 220, 255, 0.3);
 }
 
 @keyframes projects-matrix-fall {

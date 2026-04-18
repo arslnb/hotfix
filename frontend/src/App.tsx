@@ -18,7 +18,39 @@ const sidebarIncidentsIcon = new URL("./assets/sidebar/icons8-insect-50.svg", im
 const sidebarPerformanceIcon = new URL("./assets/sidebar/icons8-speed-50.svg", import.meta.url).href;
 const sidebarSettingsIcon = new URL("./assets/sidebar/icons8-settings-50.svg", import.meta.url).href;
 const brandText = "Hotfix";
-const matrixGlyphs = "HOTFIX01<>/*{}[]()+-=|:;#%$&ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const matrixCodeTokens = [
+  "const",
+  "async",
+  "await",
+  "return",
+  "fetch",
+  "project",
+  "repo",
+  "sentry",
+  "github",
+  "incident",
+  "trace",
+  "error",
+  "index",
+  "graph",
+  "cache",
+  "queue",
+  "worker",
+  "select",
+  "from",
+  "where",
+  "join",
+  "props",
+  "state",
+  "null",
+  "true",
+  "false",
+  "build",
+  "deploy",
+  "slug",
+  "hotfix",
+];
+const matrixAsciiNoise = ["{", "}", "[", "]", "(", ")", "<", ">", "/", "\\", "=", "+", "-", "*", "&", "|", ";", ":", "_", ".", ",", "?", "!", "#", "$", "%", "~"];
 const glyphVariants: Record<string, string[]> = {
   H: ["H", "#", "4"],
   o: ["o", "0", "O", "@"],
@@ -2753,11 +2785,24 @@ function ProjectsMatrixBackdrop() {
   const columnCount = 248;
   const columns = Array.from({ length: columnCount }, (_, index) => {
     const glyphCount = 22 + (index % 7);
+    const snippetCount = 5 + (index % 4);
+    const source = Array.from({ length: snippetCount }, (_, snippetIndex) => {
+      const head = matrixCodeTokens[(index * 5 + snippetIndex * 3) % matrixCodeTokens.length] ?? "const";
+      const operator = matrixAsciiNoise[(index * 7 + snippetIndex * 5) % matrixAsciiNoise.length] ?? "=";
+      const tail = matrixCodeTokens[(index * 11 + snippetIndex * 7 + 3) % matrixCodeTokens.length] ?? "state";
+      const suffix = matrixAsciiNoise[(index * 13 + snippetIndex * 2 + 1) % matrixAsciiNoise.length] ?? ";";
+      return `${head}${operator}${tail}${suffix}`;
+    }).join("");
     const characters = Array.from({ length: glyphCount }, (_, characterIndex) => {
       const toneRoll = Math.random();
+      const noiseRoll = Math.random();
+      const sourceIndex = (characterIndex * 3 + index * 5) % source.length;
 
       return {
-        value: matrixGlyphs[Math.floor(Math.random() * matrixGlyphs.length)] ?? "H",
+        value:
+          noiseRoll > 0.9
+            ? matrixAsciiNoise[Math.floor(Math.random() * matrixAsciiNoise.length)] ?? ";"
+            : source[sourceIndex] ?? "c",
         bright: characterIndex % 7 === 0,
         tone:
           toneRoll > 0.82
