@@ -1258,11 +1258,6 @@ button {
   padding-top: 0;
 }
 
-.projects-empty-frame {
-  padding-inline: var(--projects-home-inset);
-  padding-top: 1.6rem;
-}
-
 .projects-grid-lattice {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -3496,41 +3491,10 @@ button {
   animation: shimmer 1.6s linear infinite;
 }
 
-.projects-empty-state,
 .projects-error-state {
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.018);
   padding: 1.4rem;
-}
-
-.projects-empty-state {
-  text-align: center;
-}
-
-.projects-empty-illustration {
-  display: flex;
-  justify-content: center;
-  margin-bottom: 1rem;
-}
-
-.projects-empty-illustration svg {
-  display: block;
-  width: 5rem;
-  height: 5rem;
-}
-
-.projects-empty-title {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 500;
-  color: var(--text-primary);
-}
-
-.projects-empty-copy {
-  margin: 0.4rem auto 0;
-  max-width: 34rem;
-  font-size: 0.92rem;
-  color: var(--text-secondary);
 }
 
 .project-modal-backdrop {
@@ -3882,8 +3846,7 @@ button {
   }
 
   .projects-table-frame,
-  .projects-grid-frame,
-  .projects-empty-frame {
+  .projects-grid-frame {
     padding-inline: var(--projects-home-inset);
   }
 
