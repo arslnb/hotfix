@@ -767,6 +767,8 @@ function ProjectsTab(props: {
     () => "dashboard",
     async () => fetchDashboard(),
   );
+  const [tableFillerRows, setTableFillerRows] = createSignal(0);
+  let tableWrapRef: HTMLDivElement | undefined;
 
   const sentryOrganizations = createMemo(() => dashboard()?.sentryOrganizations ?? []);
   const canCreateProject = createMemo(() => projectName().trim().length > 0 && !creating());
@@ -811,6 +813,30 @@ function ProjectsTab(props: {
 
     return projects;
   });
+  const updateTableFillerRows = () => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    if (viewMode() !== "list") {
+      setTableFillerRows(0);
+      return;
+    }
+
+    const tableWrap = tableWrapRef;
+    if (!tableWrap) {
+      setTableFillerRows(0);
+      return;
+    }
+
+    const rect = tableWrap.getBoundingClientRect();
+    const remainingHeight = Math.max(0, window.innerHeight - rect.top);
+    const rowHeight = 32;
+    const headerHeight = 26;
+    const visibleRows = Math.max(0, Math.floor((remainingHeight - headerHeight) / rowHeight));
+    const fillerCount = Math.max(0, visibleRows - sortedProjects().length);
+    setTableFillerRows(Math.min(fillerCount, 24));
+  };
   const selectedProject = createMemo(
     () => sortedProjects().find((project) => project.id === selectedProjectId()) ?? null,
   );
@@ -966,6 +992,12 @@ function ProjectsTab(props: {
   });
 
   createEffect(() => {
+    sortedProjects();
+    viewMode();
+    queueMicrotask(updateTableFillerRows);
+  });
+
+  createEffect(() => {
     const route = routeProject();
     const projects = sortedProjects();
 
@@ -1097,13 +1129,20 @@ function ProjectsTab(props: {
       }
     };
 
+    const handleResize = () => {
+      updateTableFillerRows();
+    };
+
     window.addEventListener("mousedown", handlePointerDown);
     window.addEventListener("popstate", handlePopState);
     window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", handleResize);
+    updateTableFillerRows();
     onCleanup(() => {
       window.removeEventListener("mousedown", handlePointerDown);
       window.removeEventListener("popstate", handlePopState);
       window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", handleResize);
     });
   });
 
@@ -1638,7 +1677,7 @@ function ProjectsTab(props: {
                 <Show
                   when={viewMode() === "grid"}
                   fallback={
-                    <div class="projects-table-wrap">
+                    <div class="projects-table-wrap" ref={tableWrapRef}>
                       <div class="projects-table">
                         <div class="projects-table-header" role="row">
                           <div class="projects-table-header-label projects-table-header-label--index">
@@ -1819,6 +1858,25 @@ function ProjectsTab(props: {
                                   </Show>
                                 </div>
                               </article>
+                            )}
+                          </For>
+                          <For each={Array.from({ length: tableFillerRows() }, (_, index) => index)}>
+                            {(index) => (
+                              <div class="project-card is-table-row is-filler" aria-hidden="true">
+                                <div class="project-card-main">
+                                  <div class="project-card-cell project-card-cell--index">
+                                    <p class="project-card-meta">{sortedProjects().length + index + 1}</p>
+                                  </div>
+                                  <div class="project-card-cell project-card-cell--name" />
+                                  <div class="project-card-cell project-card-cell--health" />
+                                  <div class="project-card-cell project-card-cell--indexing" />
+                                  <div class="project-card-cell project-card-cell--incidents" />
+                                  <div class="project-card-cell project-card-cell--last-activity" />
+                                  <div class="project-card-cell project-card-cell--created" />
+                                  <div class="project-card-cell project-card-cell--activity" />
+                                </div>
+                                <div class="project-card-menu" />
+                              </div>
                             )}
                           </For>
                         </div>
