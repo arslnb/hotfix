@@ -903,8 +903,24 @@ button {
   white-space: nowrap;
 }
 
-.projects-table-wrap {
+.projects-table-frame {
   margin-top: -1.6rem;
+  position: relative;
+}
+
+.projects-table-frame::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 100vw;
+  height: 1px;
+  transform: translateX(-50%);
+  background: rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+}
+
+.projects-table-wrap {
   overflow-x: auto;
   -ms-overflow-style: none;
   scrollbar-width: none;

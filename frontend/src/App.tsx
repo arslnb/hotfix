@@ -1672,9 +1672,10 @@ function ProjectsTab(props: {
                 <Show
                   when={viewMode() === "grid"}
                   fallback={
-                    <div class="projects-table-wrap" ref={tableWrapRef}>
-                      <div class="projects-table">
-                        <div class="projects-table-header" role="row">
+                    <div class="projects-table-frame">
+                      <div class="projects-table-wrap" ref={tableWrapRef}>
+                        <div class="projects-table">
+                          <div class="projects-table-header" role="row">
                           <div class="projects-table-header-label projects-table-header-label--index">
                             #
                           </div>
@@ -1723,7 +1724,7 @@ function ProjectsTab(props: {
                           <div class="projects-table-header-spacer" aria-hidden="true" />
                         </div>
 
-                        <div class="projects-collection is-table">
+                          <div class="projects-collection is-table">
                           <For each={sortedProjects()}>
                             {(project, index) => (
                               <article
@@ -1881,6 +1882,7 @@ function ProjectsTab(props: {
                               </div>
                             )}
                           </For>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -2205,9 +2207,10 @@ function ProjectsHomeSkeleton(props: { viewMode: ProjectsView }) {
       <Show
         when={props.viewMode === "grid"}
         fallback={
-          <div class="projects-table-wrap is-skeleton">
-            <div class="projects-table">
-              <div class="projects-table-header is-skeleton" role="row">
+          <div class="projects-table-frame is-skeleton">
+            <div class="projects-table-wrap is-skeleton">
+              <div class="projects-table">
+                <div class="projects-table-header is-skeleton" role="row">
                 <div class="projects-table-header-label projects-table-header-label--index">#</div>
                 <div class="projects-table-header-label">Name</div>
                 <div class="projects-table-header-label">Health</div>
@@ -2219,7 +2222,7 @@ function ProjectsHomeSkeleton(props: { viewMode: ProjectsView }) {
                 <div class="projects-table-header-spacer" aria-hidden="true" />
               </div>
 
-              <div class="projects-collection is-table is-skeleton">
+                <div class="projects-collection is-table is-skeleton">
                 <For each={skeletonRows}>
                   {() => (
                     <article class="project-card is-table-row is-skeleton">
@@ -2261,6 +2264,7 @@ function ProjectsHomeSkeleton(props: { viewMode: ProjectsView }) {
                     </article>
                   )}
                 </For>
+                </div>
               </div>
             </div>
           </div>
