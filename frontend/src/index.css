@@ -2887,6 +2887,229 @@ button {
   gap: 0.75rem;
 }
 
+.projects-home-surface.is-skeleton {
+  pointer-events: none;
+}
+
+.projects-skeleton-block,
+.projects-skeleton-button,
+.projects-skeleton-menu,
+.projects-skeleton-pill,
+.projects-skeleton-icon,
+.projects-skeleton-node-icon,
+.projects-skeleton-square,
+.projects-skeleton-sparkline,
+.projects-skeleton-mini-chart,
+.project-home-control-button.is-skeleton,
+.projects-view-button.is-skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.03) 0%,
+    rgba(255, 255, 255, 0.06) 45%,
+    rgba(255, 255, 255, 0.03) 100%
+  );
+  background-size: 220% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+.projects-skeleton-title {
+  width: 6.8rem;
+  height: 2.1rem;
+  border-radius: 4px;
+}
+
+.projects-skeleton-subtitle {
+  width: 20rem;
+  height: 0.95rem;
+  margin-top: 0.8rem;
+  border-radius: 4px;
+}
+
+.projects-skeleton-button {
+  border-radius: 4px;
+}
+
+.projects-skeleton-button--new {
+  width: 9.65rem;
+  height: 2.5rem;
+}
+
+.projects-skeleton-button--avatar {
+  width: 2rem;
+  height: 2rem;
+}
+
+.projects-view-toggle.is-skeleton {
+  gap: 0.1rem;
+}
+
+.projects-view-button.is-skeleton {
+  cursor: default;
+}
+
+.projects-skeleton-inline-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+}
+
+.projects-skeleton-icon {
+  width: 0.78rem;
+  height: 0.78rem;
+  border-radius: 3px;
+}
+
+.projects-skeleton-pill {
+  width: 3.6rem;
+  height: 1rem;
+  border-radius: 3px;
+}
+
+.projects-skeleton-menu {
+  width: 1.25rem;
+  height: 0.3rem;
+  border-radius: 999px;
+}
+
+.projects-skeleton-text {
+  height: 0.62rem;
+  border-radius: 3px;
+}
+
+.projects-skeleton-text--name {
+  width: 6.4rem;
+  height: 0.82rem;
+}
+
+.projects-skeleton-text--date {
+  width: 4.6rem;
+}
+
+.projects-skeleton-text--tiny {
+  width: 1.3rem;
+}
+
+.projects-skeleton-text--medium {
+  width: 4.9rem;
+}
+
+.projects-skeleton-text--long {
+  width: 9.8rem;
+}
+
+.projects-skeleton-text--node-title {
+  width: 5.2rem;
+  height: 0.82rem;
+}
+
+.projects-skeleton-text--node-subtitle {
+  width: 4.2rem;
+  margin-top: 0.38rem;
+}
+
+.projects-skeleton-sparkline {
+  width: 100%;
+  height: 2rem;
+  border-radius: 0;
+}
+
+.projects-skeleton-sparkline--inline {
+  width: 1rem;
+  height: 0.24rem;
+  border-radius: 999px;
+}
+
+.projects-skeleton-sparkline--hero {
+  width: 11rem;
+  height: 2rem;
+  border-radius: 4px;
+}
+
+.projects-skeleton-header-chip {
+  width: 5rem;
+  height: 0.9rem;
+  border-radius: 4px;
+}
+
+.projects-skeleton-header-title {
+  width: min(100%, 10rem);
+  height: 1rem;
+  border-radius: 4px;
+}
+
+.projects-skeleton-header-meta {
+  width: 7.8rem;
+  height: 0.8rem;
+  border-radius: 4px;
+  margin-left: auto;
+}
+
+.projects-skeleton-card-label {
+  width: 4.2rem;
+  height: 0.62rem;
+  border-radius: 3px;
+}
+
+.projects-skeleton-card-title {
+  width: 8.2rem;
+  height: 1rem;
+  margin-top: 0.8rem;
+  border-radius: 4px;
+}
+
+.projects-skeleton-card-copy {
+  width: 100%;
+  height: 0.72rem;
+  margin-top: 0.65rem;
+  border-radius: 4px;
+}
+
+.projects-skeleton-card-copy--short {
+  width: 72%;
+}
+
+.projects-skeleton-button--add {
+  width: 4.9rem;
+  height: 2rem;
+}
+
+.project-home-node-grid-skeleton {
+  position: absolute;
+  inset: 4.75rem 2rem 2rem;
+  display: grid;
+  grid-template-columns: repeat(2, 15.5rem);
+  gap: 1.4rem 1.8rem;
+  align-content: start;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.project-graph-node-card.is-skeleton {
+  transform: none;
+  filter: none;
+}
+
+.projects-skeleton-node-icon {
+  width: 0.95rem;
+  height: 0.95rem;
+  border-radius: 3px;
+}
+
+.projects-skeleton-square {
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 4px;
+}
+
+.projects-skeleton-mini-chart {
+  width: 100%;
+  height: 100%;
+}
+
+.project-section-card-skeleton {
+  min-height: 10.5rem;
+}
+
 .projects-loading-row {
   height: 4.8rem;
   border-radius: 4px;

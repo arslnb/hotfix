@@ -1452,11 +1452,12 @@ function ProjectsTab(props: {
         <Show
           when={!dashboard.loading}
           fallback={
-            <div class="projects-loading-list" aria-hidden="true">
-              <div class="projects-loading-row" />
-              <div class="projects-loading-row" />
-              <div class="projects-loading-row" />
-            </div>
+            <Show
+              when={!routeProject().slug}
+              fallback={<ProjectWorkspaceSkeleton activeSection={routeProject().section} />}
+            >
+              <ProjectsHomeSkeleton viewMode={viewMode()} />
+            </Show>
           }
         >
           <Show when={openedProject()}>
@@ -2119,6 +2120,248 @@ function ProjectsTab(props: {
           onClose={() => setSettingsModalOpen(false)}
           onLogout={props.onLogout}
         />
+      </Show>
+    </div>
+  );
+}
+
+function ProjectsHomeSkeleton(props: { viewMode: ProjectsView }) {
+  const skeletonRows = [0, 1, 2, 3, 4];
+  const skeletonCards = [0, 1, 2];
+
+  return (
+    <div class="projects-home-surface is-skeleton" aria-hidden="true">
+      <div class="projects-header-block">
+        <div class="projects-header">
+          <div class="projects-header-copy">
+            <div class="projects-skeleton-block projects-skeleton-title" />
+            <div class="projects-skeleton-block projects-skeleton-subtitle" />
+          </div>
+
+          <div class="projects-header-actions">
+            <div class="projects-view-toggle is-skeleton">
+              <div class="projects-view-button is-skeleton" />
+              <div class="projects-view-button is-skeleton" />
+            </div>
+            <div class="projects-skeleton-button projects-skeleton-button--new" />
+            <div class="projects-skeleton-button projects-skeleton-button--avatar" />
+          </div>
+        </div>
+        <div class="projects-header-rule" aria-hidden="true" />
+      </div>
+
+      <Show
+        when={props.viewMode === "grid"}
+        fallback={
+          <div class="projects-table-wrap is-skeleton">
+            <div class="projects-table">
+              <div class="projects-table-header is-skeleton" role="row">
+                <div class="projects-table-header-label">Name</div>
+                <div class="projects-table-header-label">Connections</div>
+                <div class="projects-table-header-label">Health</div>
+                <div class="projects-table-header-label">Items</div>
+                <div class="projects-table-header-label">Indexing</div>
+                <div class="projects-table-header-label">Incidents</div>
+                <div class="projects-table-header-label">Last activity</div>
+                <div class="projects-table-header-label">Created at</div>
+                <div class="projects-table-header-label">Activity</div>
+                <div class="projects-table-header-spacer" aria-hidden="true" />
+              </div>
+
+              <div class="projects-collection is-table is-skeleton">
+                <For each={skeletonRows}>
+                  {() => (
+                    <article class="project-card is-table-row is-skeleton">
+                      <div class="project-card-main">
+                        <div class="project-card-cell project-card-cell--name">
+                          <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--name" />
+                        </div>
+                        <div class="project-card-cell project-card-cell--connections">
+                          <div class="projects-skeleton-inline-icons">
+                            <span class="projects-skeleton-icon" />
+                            <span class="projects-skeleton-icon" />
+                          </div>
+                        </div>
+                        <div class="project-card-cell project-card-cell--health">
+                          <div class="projects-skeleton-pill" />
+                        </div>
+                        <div class="project-card-cell project-card-cell--items">
+                          <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--tiny" />
+                        </div>
+                        <div class="project-card-cell project-card-cell--indexing">
+                          <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--medium" />
+                        </div>
+                        <div class="project-card-cell project-card-cell--incidents">
+                          <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--tiny" />
+                        </div>
+                        <div class="project-card-cell project-card-cell--last-activity">
+                          <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--medium" />
+                        </div>
+                        <div class="project-card-cell project-card-cell--created">
+                          <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--medium" />
+                        </div>
+                        <div class="project-card-cell project-card-cell--activity">
+                          <div class="projects-skeleton-sparkline projects-skeleton-sparkline--inline" />
+                        </div>
+                      </div>
+                      <div class="project-card-menu">
+                        <div class="projects-skeleton-menu" />
+                      </div>
+                    </article>
+                  )}
+                </For>
+              </div>
+            </div>
+          </div>
+        }
+      >
+        <div class="projects-collection is-grid is-skeleton">
+          <For each={skeletonCards}>
+            {() => (
+              <article class="project-card is-grid is-skeleton">
+                <div class="project-card-main">
+                  <div class="project-card-copy">
+                    <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--name" />
+                    <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--date" />
+                  </div>
+                  <div class="project-card-stats">
+                    <div class="projects-skeleton-sparkline" />
+                  </div>
+                </div>
+                <div class="project-card-menu">
+                  <div class="projects-skeleton-menu" />
+                </div>
+              </article>
+            )}
+          </For>
+        </div>
+      </Show>
+    </div>
+  );
+}
+
+function ProjectWorkspaceSkeleton(props: { activeSection: ProjectRouteSection }) {
+  return (
+    <div class="project-workspace is-skeleton" aria-hidden="true">
+      <div class="project-page-header-shell">
+        <header class="project-page-header">
+          <div class="project-page-header-side">
+            <div class="projects-skeleton-block projects-skeleton-header-chip" />
+          </div>
+
+          <div class="project-page-header-center">
+            <div class="projects-skeleton-block projects-skeleton-header-title" />
+          </div>
+
+          <div class="project-page-header-side project-page-header-side--right">
+            <div class="projects-skeleton-block projects-skeleton-header-meta" />
+          </div>
+        </header>
+      </div>
+
+      <Show
+        when={props.activeSection === "home"}
+        fallback={
+          <div class="project-workspace-body">
+            <div class="project-workspace-hero is-skeleton">
+              <div class="project-workspace-copy">
+                <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--medium" />
+                <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--long" />
+              </div>
+              <div class="projects-skeleton-sparkline projects-skeleton-sparkline--hero" />
+            </div>
+
+            <div class="project-workspace-grid">
+              <div class="logged-in-card project-section-card-skeleton">
+                <div class="projects-skeleton-block projects-skeleton-card-label" />
+                <div class="projects-skeleton-block projects-skeleton-card-title" />
+                <div class="projects-skeleton-block projects-skeleton-card-copy" />
+                <div class="projects-skeleton-block projects-skeleton-card-copy projects-skeleton-card-copy--short" />
+              </div>
+              <div class="logged-in-card project-section-card-skeleton">
+                <div class="projects-skeleton-block projects-skeleton-card-label" />
+                <div class="projects-skeleton-block projects-skeleton-card-title" />
+                <div class="projects-skeleton-block projects-skeleton-card-copy" />
+                <div class="projects-skeleton-block projects-skeleton-card-copy projects-skeleton-card-copy--short" />
+              </div>
+              <div class="logged-in-card project-section-card-skeleton">
+                <div class="projects-skeleton-block projects-skeleton-card-label" />
+                <div class="projects-skeleton-block projects-skeleton-card-title" />
+                <div class="projects-skeleton-block projects-skeleton-card-copy" />
+              </div>
+            </div>
+          </div>
+        }
+      >
+        <div class="project-workspace-body is-home">
+          <div class="project-home-shell is-skeleton">
+            <div class="project-home-stage">
+              <div class="project-home-canvas" />
+              <div class="project-home-actions">
+                <div class="projects-skeleton-button projects-skeleton-button--add" />
+              </div>
+              <div class="project-home-controls">
+                <div class="project-home-control-group">
+                  <div class="project-home-control-button is-skeleton" />
+                  <div class="project-home-control-button is-skeleton" />
+                  <div class="project-home-control-button is-skeleton" />
+                </div>
+              </div>
+              <div class="project-home-node-grid-skeleton">
+                <div class="project-graph-node-card is-skeleton">
+                  <div class="project-graph-node-card-body">
+                    <div class="project-graph-node-card-top">
+                      <div class="project-graph-node-card-header">
+                        <div class="projects-skeleton-node-icon" />
+                        <div class="project-graph-node-card-copy">
+                          <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--node-title" />
+                          <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--node-subtitle" />
+                        </div>
+                      </div>
+                      <div class="project-graph-node-actions">
+                        <div class="projects-skeleton-square" />
+                        <div class="projects-skeleton-square" />
+                      </div>
+                    </div>
+                    <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--medium" />
+                    <div class="project-graph-node-card-badges">
+                      <div class="projects-skeleton-pill" />
+                      <div class="projects-skeleton-pill" />
+                    </div>
+                  </div>
+                  <div class="project-graph-node-card-footer">
+                    <div class="projects-skeleton-mini-chart" />
+                  </div>
+                </div>
+
+                <div class="project-graph-node-card is-skeleton">
+                  <div class="project-graph-node-card-body">
+                    <div class="project-graph-node-card-top">
+                      <div class="project-graph-node-card-header">
+                        <div class="projects-skeleton-node-icon" />
+                        <div class="project-graph-node-card-copy">
+                          <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--node-title" />
+                          <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--node-subtitle" />
+                        </div>
+                      </div>
+                      <div class="project-graph-node-actions">
+                        <div class="projects-skeleton-square" />
+                        <div class="projects-skeleton-square" />
+                      </div>
+                    </div>
+                    <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--medium" />
+                    <div class="project-graph-node-card-badges">
+                      <div class="projects-skeleton-pill" />
+                    </div>
+                  </div>
+                  <div class="project-graph-node-card-footer">
+                    <div class="projects-skeleton-mini-chart" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </Show>
     </div>
   );
