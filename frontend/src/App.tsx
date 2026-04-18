@@ -1422,78 +1422,79 @@ function ProjectsTab(props: {
           </Show>
           <Show when={!openedProject()}>
             <div class="projects-home-surface">
-              <div class="projects-header">
-                <div class="projects-header-copy">
-                  <h1 class="projects-title">Map Your Software Surface</h1>
-                  <p class="projects-subtitle">
-                    Create a project, connect the systems behind it, and build a clear operating view of how your code,
-                    telemetry, and incidents fit together.
-                  </p>
-                  <div class="projects-header-rule" aria-hidden="true" />
-                </div>
+              <div class="projects-header-block">
+                <div class="projects-header">
+                  <div class="projects-header-copy">
+                    <h1 class="projects-title">Project Map</h1>
+                    <p class="projects-subtitle">
+                      Create a project and map the repos, services, and telemetry behind it.
+                    </p>
+                  </div>
 
-                <div class="projects-header-actions">
-                  <button
-                    class="brand-button is-inverted"
-                    type="button"
-                    onClick={openCreateModal}
-                    disabled={dashboard.loading}
-                  >
-                    <span class="brand-button-plus" aria-hidden="true">
-                      +
-                    </span>
-                    <span>New project</span>
-                    <span class="brand-button-shortcut" aria-hidden="true">
-                      N
-                    </span>
-                  </button>
-
-                  <div class="projects-account-menu" data-projects-account-menu>
+                  <div class="projects-header-actions">
                     <button
-                      class="projects-account-trigger"
+                      class="brand-button is-inverted"
                       type="button"
-                      aria-haspopup="menu"
-                      aria-expanded={accountMenuOpen()}
-                      onClick={() => setAccountMenuOpen((open) => !open)}
+                      onClick={openCreateModal}
+                      disabled={dashboard.loading}
                     >
-                      <UserAvatar user={props.user} />
+                      <span class="brand-button-plus" aria-hidden="true">
+                        +
+                      </span>
+                      <span>New project</span>
+                      <span class="brand-button-shortcut" aria-hidden="true">
+                        N
+                      </span>
                     </button>
 
-                    <Show when={accountMenuOpen()}>
-                      <div class="projects-account-popover" role="menu">
-                        <div class="projects-account-popover-copy">
-                          <p class="projects-account-popover-name">{props.user.displayName}</p>
-                          <p class="projects-account-popover-email">
-                            {props.user.email ?? "Signed in"}
-                          </p>
+                    <div class="projects-account-menu" data-projects-account-menu>
+                      <button
+                        class="projects-account-trigger"
+                        type="button"
+                        aria-haspopup="menu"
+                        aria-expanded={accountMenuOpen()}
+                        onClick={() => setAccountMenuOpen((open) => !open)}
+                      >
+                        <UserAvatar user={props.user} />
+                      </button>
+
+                      <Show when={accountMenuOpen()}>
+                        <div class="projects-account-popover" role="menu">
+                          <div class="projects-account-popover-copy">
+                            <p class="projects-account-popover-name">{props.user.displayName}</p>
+                            <p class="projects-account-popover-email">
+                              {props.user.email ?? "Signed in"}
+                            </p>
+                          </div>
+                          <button
+                            class="projects-account-popover-item"
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setAccountMenuOpen(false);
+                              setSettingsModalOpen(true);
+                            }}
+                          >
+                            Settings
+                          </button>
+                          <button
+                            class="projects-account-popover-item"
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setAccountMenuOpen(false);
+                              void props.onLogout();
+                            }}
+                            disabled={props.loggingOut}
+                          >
+                            {props.loggingOut ? "Logging out..." : "Log out"}
+                          </button>
                         </div>
-                        <button
-                          class="projects-account-popover-item"
-                          type="button"
-                          role="menuitem"
-                          onClick={() => {
-                            setAccountMenuOpen(false);
-                            setSettingsModalOpen(true);
-                          }}
-                        >
-                          Settings
-                        </button>
-                        <button
-                          class="projects-account-popover-item"
-                          type="button"
-                          role="menuitem"
-                          onClick={() => {
-                            setAccountMenuOpen(false);
-                            void props.onLogout();
-                          }}
-                          disabled={props.loggingOut}
-                        >
-                          {props.loggingOut ? "Logging out..." : "Log out"}
-                        </button>
-                      </div>
-                    </Show>
+                      </Show>
+                    </div>
                   </div>
                 </div>
+                <div class="projects-header-rule" aria-hidden="true" />
               </div>
 
               <div class="projects-toolbar">

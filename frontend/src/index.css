@@ -516,7 +516,7 @@ button {
 .logged-in-panel {
   min-height: 100%;
   background: transparent;
-  padding: 150px calc(clamp(8rem, 18vw, 15rem) + 50px) 2rem;
+  padding: 100px calc(clamp(8rem, 18vw, 15rem) + 50px) 2rem;
 }
 
 .logged-in-panel.is-project-open {
@@ -593,13 +593,14 @@ button {
 }
 
 .brand-button.is-inverted {
-  border: 1px solid rgba(127, 220, 255, 0.52);
+  border: 1px solid rgba(127, 220, 255, 0.24);
   background: rgba(7, 9, 10, 0.92);
   color: rgba(164, 240, 255, 0.92);
 }
 
 .brand-button.is-inverted:hover {
   background: rgba(11, 15, 18, 0.98);
+  border-color: rgba(127, 220, 255, 0.56);
   color: rgba(197, 245, 255, 0.96);
 }
 
@@ -813,10 +814,16 @@ button {
   gap: 1rem;
 }
 
+.projects-header-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.82rem;
+}
+
 .projects-header-copy {
   display: flex;
   flex-direction: column;
-  gap: 0.58rem;
+  gap: 0.44rem;
   max-width: 39rem;
 }
 
@@ -829,7 +836,7 @@ button {
 
 .projects-title {
   margin: 0;
-  font-size: 1.72rem;
+  font-size: 1.62rem;
   font-weight: 500;
   letter-spacing: -0.04em;
   color: var(--text-primary);
@@ -837,16 +844,16 @@ button {
 
 .projects-subtitle {
   margin: 0;
-  max-width: 34rem;
-  font-size: 0.92rem;
-  line-height: 1.55;
-  color: rgba(242, 238, 227, 0.46);
+  max-width: 26rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: rgba(242, 238, 227, 0.42);
 }
 
 .projects-header-rule {
-  width: min(100%, 22rem);
+  width: 100%;
   height: 1px;
-  background: linear-gradient(90deg, rgba(127, 220, 255, 0.42), rgba(127, 220, 255, 0.08) 64%, transparent);
+  background: linear-gradient(90deg, rgba(127, 220, 255, 0.42), rgba(127, 220, 255, 0.12) 72%, rgba(127, 220, 255, 0.06));
 }
 
 .projects-toolbar {
