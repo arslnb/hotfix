@@ -7,6 +7,7 @@ use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
     sync::Arc,
+    time::Duration,
 };
 
 use aes_gcm::{
@@ -28,7 +29,7 @@ use base64::{
 };
 use dotenvy::dotenv;
 use hmac::{Hmac, Mac};
-use indexing::IndexingService;
+use indexing::{IndexingService, SandboxIndexRequest, SnapshotIndex, execute_sandbox_index};
 use rand::random;
 use reqwest::header::{ACCEPT, USER_AGENT};
 use serde::{Deserialize, Serialize};
@@ -222,6 +223,8 @@ struct AppConfig {
     sentry_client_secret: String,
     frontend_dist: Option<PathBuf>,
     snapshot_cache_dir: PathBuf,
+    sandbox_url: Url,
+    index_job_poll_interval: Duration,
     github_webhook_secret: Option<String>,
 }
 
@@ -246,6 +249,22 @@ impl AppConfig {
             .ok()
             .map(PathBuf::from)
             .unwrap_or_else(|| env::temp_dir().join("hotfix-snapshots"));
+        let sandbox_url =
+            env::var("HOTFIX_SANDBOX_URL").unwrap_or_else(|_| "http://127.0.0.1:4001".to_string());
+        let sandbox_url = Url::parse(&sandbox_url)
+            .map_err(|_| AppError::Config("HOTFIX_SANDBOX_URL must be a valid URL".into()))?;
+        let index_job_poll_interval = env::var("HOTFIX_INDEX_JOB_POLL_INTERVAL_MS")
+            .ok()
+            .map(|value| {
+                value.parse::<u64>().map(Duration::from_millis).map_err(|_| {
+                    AppError::Config(
+                        "HOTFIX_INDEX_JOB_POLL_INTERVAL_MS must be an integer number of milliseconds"
+                            .into(),
+                    )
+                })
+            })
+            .transpose()?
+            .unwrap_or_else(|| Duration::from_millis(1500));
         let github_webhook_secret = env::var("HOTFIX_GITHUB_WEBHOOK_SECRET")
             .ok()
             .map(|value| value.trim().to_string())
@@ -262,8 +281,31 @@ impl AppConfig {
             sentry_client_secret: required_env("HOTFIX_SENTRY_CLIENT_SECRET")?,
             frontend_dist,
             snapshot_cache_dir,
+            sandbox_url,
+            index_job_poll_interval,
             github_webhook_secret,
         })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RunMode {
+    Api,
+    MockSandbox,
+}
+
+impl RunMode {
+    fn from_env() -> Result<Self, AppError> {
+        match env::var("HOTFIX_RUN_MODE")
+            .unwrap_or_else(|_| "api".to_string())
+            .trim()
+        {
+            "" | "api" => Ok(Self::Api),
+            "mock_sandbox" => Ok(Self::MockSandbox),
+            _ => Err(AppError::Config(
+                "HOTFIX_RUN_MODE must be either `api` or `mock_sandbox`.".into(),
+            )),
+        }
     }
 }
 
@@ -1214,6 +1256,13 @@ async fn main() -> Result<(), AppError> {
     let _ = dotenv();
     init_tracing();
 
+    match RunMode::from_env()? {
+        RunMode::Api => run_api().await,
+        RunMode::MockSandbox => run_mock_sandbox().await,
+    }
+}
+
+async fn run_api() -> Result<(), AppError> {
     let config = Arc::new(AppConfig::from_env()?);
     let db = PgPoolOptions::new()
         .max_connections(10)
@@ -1334,6 +1383,33 @@ async fn main() -> Result<(), AppError> {
     axum::serve(listener, app)
         .await
         .map_err(|_| AppError::Internal)
+}
+
+async fn run_mock_sandbox() -> Result<(), AppError> {
+    let listen_addr: SocketAddr = env::var("HOTFIX_MOCK_SANDBOX_LISTEN_ADDR")
+        .unwrap_or_else(|_| "127.0.0.1:4001".to_string())
+        .parse()
+        .map_err(|_| {
+            AppError::Config("HOTFIX_MOCK_SANDBOX_LISTEN_ADDR must be host:port".into())
+        })?;
+    let app = Router::new()
+        .route("/health", get(health))
+        .route("/index-jobs", post(run_mock_sandbox_index_job));
+    let listener = tokio::net::TcpListener::bind(listen_addr)
+        .await
+        .map_err(|_| AppError::Internal)?;
+    axum::serve(listener, app)
+        .await
+        .map_err(|_| AppError::Internal)
+}
+
+async fn run_mock_sandbox_index_job(
+    Json(request): Json<SandboxIndexRequest>,
+) -> Result<Json<SnapshotIndex>, AppError> {
+    let result = tokio::task::spawn_blocking(move || execute_sandbox_index(&request))
+        .await
+        .map_err(|_| AppError::Internal)??;
+    Ok(Json(result))
 }
 
 #[derive(Serialize)]
@@ -1866,8 +1942,8 @@ async fn create_project_graph_item(
     .await?;
     tx.commit().await?;
 
-    if let Some(job_id) = maybe_job_id {
-        state.indexing.enqueue(job_id).await?;
+    if maybe_job_id.is_some() {
+        state.indexing.notify().await?;
     }
 
     let payload = build_project_graph_payload(&state.db, project_id).await?;
@@ -2083,7 +2159,7 @@ async fn handle_github_webhook(
         commit_sha: payload.after.clone(),
         is_default: payload.repository.default_branch.as_deref() == Some(branch_name),
     };
-    let mut enqueued_jobs = Vec::new();
+    let mut queued_any = false;
 
     for node in matching_nodes {
         let repo = GitHubRepositoryPayload {
@@ -2114,13 +2190,13 @@ async fn handle_github_webhook(
         .await?;
         tx.commit().await?;
 
-        if let Some(job_id) = job_id {
-            enqueued_jobs.push(job_id);
+        if job_id.is_some() {
+            queued_any = true;
         }
     }
 
-    for job_id in enqueued_jobs {
-        state.indexing.enqueue(job_id).await?;
+    if queued_any {
+        state.indexing.notify().await?;
     }
 
     Ok(StatusCode::ACCEPTED)

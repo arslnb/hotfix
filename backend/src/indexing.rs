@@ -8,24 +8,30 @@ use std::{
 
 use async_trait::async_trait;
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, PgPool};
 use tempfile::TempDir;
-use tokio::{sync::mpsc, time::timeout};
+use tokio::{
+    sync::mpsc,
+    time::{MissedTickBehavior, interval, timeout},
+};
 use tracing::{error, warn};
 use tree_sitter::{Language, Node, Parser};
+use url::Url;
 use uuid::Uuid;
 use walkdir::{DirEntry, WalkDir};
 use zip::ZipArchive;
 
 use crate::{AppConfig, AppError, decrypt_provider_token};
 
-const INDEX_JOB_CHANNEL_CAPACITY: usize = 128;
+const INDEX_JOB_CHANNEL_CAPACITY: usize = 32;
 const INDEX_JOB_TIMEOUT: Duration = Duration::from_secs(120);
+const INDEX_JOB_LEASE_SECONDS: i32 = 300;
 const MAX_INDEXED_FILE_BYTES: u64 = 512 * 1024;
 
 #[derive(Clone)]
 pub(crate) struct IndexingService {
-    tx: mpsc::Sender<Uuid>,
+    tx: mpsc::Sender<()>,
 }
 
 impl IndexingService {
@@ -39,58 +45,99 @@ impl IndexingService {
         tokio::spawn(async move {
             let resolver = GitHubSnapshotResolver::new(
                 worker_db.clone(),
-                worker_http,
+                worker_http.clone(),
                 Arc::clone(&worker_config),
             );
-            let workspace_provider = ContainerWorkspaceProvider::new(
-                worker_config.snapshot_cache_dir.join("workspaces"),
-            );
-            let indexer = TreeSitterIndexer::default();
-            let executor = NoopCommandExecutor;
+            let sandbox = HttpSandboxProvider::new(worker_http, worker_config.sandbox_url.clone());
             let policy = ExecutionPolicy::default_indexing();
+            let claimer_id = format!("api-{}", Uuid::new_v4());
+            let mut ticker = interval(worker_config.index_job_poll_interval);
+            ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-            while let Some(job_id) = rx.recv().await {
-                if let Err(error) = run_index_job(
-                    &worker_db,
-                    &resolver,
-                    &workspace_provider,
-                    &executor,
-                    &indexer,
-                    &policy,
-                    job_id,
-                )
-                .await
-                {
-                    error!(job_id = %job_id, error = ?error, "index job failed");
-                    if let Err(update_error) =
-                        mark_index_job_failed(&worker_db, job_id, error.client_message()).await
+            loop {
+                tokio::select! {
+                    maybe = rx.recv() => {
+                        if maybe.is_none() {
+                            break;
+                        }
+                    }
+                    _ = ticker.tick() => {}
+                }
+
+                loop {
+                    let Some(job) = (match claim_next_index_job(
+                        &worker_db,
+                        &claimer_id,
+                        INDEX_JOB_LEASE_SECONDS,
+                    )
+                    .await
                     {
-                        error!(job_id = %job_id, error = ?update_error, "could not persist index job failure");
+                        Ok(job) => job,
+                        Err(error) => {
+                            error!(error = ?error, "could not claim index job");
+                            break;
+                        }
+                    }) else {
+                        break;
+                    };
+
+                    if let Err(error) =
+                        mark_snapshot_progress(&worker_db, job.repo_snapshot_id, 5, &claimer_id)
+                            .await
+                    {
+                        error!(
+                            snapshot_id = %job.repo_snapshot_id,
+                            error = ?error,
+                            "could not mark snapshot indexing progress"
+                        );
+                    }
+
+                    if let Err(error) = run_claimed_index_job(
+                        &worker_db,
+                        &resolver,
+                        &sandbox,
+                        &policy,
+                        &claimer_id,
+                        &job,
+                    )
+                    .await
+                    {
+                        error!(
+                            job_id = %job.job_id,
+                            snapshot_id = %job.repo_snapshot_id,
+                            error = ?error,
+                            "index job failed"
+                        );
+                        if let Err(update_error) = mark_snapshot_failed(
+                            &worker_db,
+                            job.repo_snapshot_id,
+                            error.client_message(),
+                        )
+                        .await
+                        {
+                            error!(
+                                snapshot_id = %job.repo_snapshot_id,
+                                error = ?update_error,
+                                "could not persist index job failure"
+                            );
+                        }
                     }
                 }
-            }
-        });
-
-        let resume_tx = tx;
-        tokio::spawn(async move {
-            if let Err(error) = enqueue_pending_jobs(&db, &resume_tx).await {
-                warn!(error = ?error, "could not enqueue pending index jobs");
             }
         });
 
         service
     }
 
-    pub(crate) async fn enqueue(&self, job_id: Uuid) -> Result<(), AppError> {
-        self.tx.send(job_id).await.map_err(|_| AppError::Internal)
+    pub(crate) async fn notify(&self) -> Result<(), AppError> {
+        self.tx.send(()).await.map_err(|_| AppError::Internal)
     }
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-struct ExecutionPolicy {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct ExecutionPolicy {
     pub allow_network: bool,
-    pub max_duration: Duration,
+    pub max_duration_ms: u64,
     pub max_output_bytes: usize,
     pub max_memory_bytes: usize,
 }
@@ -99,31 +146,42 @@ impl ExecutionPolicy {
     fn default_indexing() -> Self {
         Self {
             allow_network: false,
-            max_duration: INDEX_JOB_TIMEOUT,
+            max_duration_ms: INDEX_JOB_TIMEOUT.as_millis() as u64,
             max_output_bytes: 64 * 1024,
             max_memory_bytes: 256 * 1024 * 1024,
         }
+    }
+
+    fn max_duration(&self) -> Duration {
+        Duration::from_millis(self.max_duration_ms)
     }
 }
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct SandboxCommand {
-    pub program: String,
-    pub args: Vec<String>,
+    program: String,
+    args: Vec<String>,
 }
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 struct CommandResult {
-    pub stdout: Vec<u8>,
-    pub stderr: Vec<u8>,
-    pub exit_code: i32,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    exit_code: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct SandboxIndexRequest {
+    pub artifact_path: PathBuf,
+    pub base_directory: String,
+    pub policy: ExecutionPolicy,
 }
 
 #[async_trait]
 trait SnapshotResolver: Send + Sync {
-    async fn ensure_artifact(&self, job: &IndexJobExecutionRow) -> Result<PathBuf, AppError>;
+    async fn ensure_artifact(&self, job: &ClaimedIndexJob) -> Result<PathBuf, AppError>;
 }
 
 trait WorkspaceProvider: Send + Sync {
@@ -148,6 +206,11 @@ trait Indexer: Send + Sync {
     fn index(&self, workspace_root: &Path) -> Result<SnapshotIndex, AppError>;
 }
 
+#[async_trait]
+trait SandboxProvider: Send + Sync {
+    async fn index(&self, request: &SandboxIndexRequest) -> Result<SnapshotIndex, AppError>;
+}
+
 struct GitHubSnapshotResolver {
     db: PgPool,
     http: reqwest::Client,
@@ -162,7 +225,7 @@ impl GitHubSnapshotResolver {
 
 #[async_trait]
 impl SnapshotResolver for GitHubSnapshotResolver {
-    async fn ensure_artifact(&self, job: &IndexJobExecutionRow) -> Result<PathBuf, AppError> {
+    async fn ensure_artifact(&self, job: &ClaimedIndexJob) -> Result<PathBuf, AppError> {
         let artifact_path = self
             .config
             .snapshot_cache_dir
@@ -235,6 +298,48 @@ impl SnapshotResolver for GitHubSnapshotResolver {
     }
 }
 
+struct HttpSandboxProvider {
+    http: reqwest::Client,
+    sandbox_url: Url,
+}
+
+impl HttpSandboxProvider {
+    fn new(http: reqwest::Client, sandbox_url: Url) -> Self {
+        Self { http, sandbox_url }
+    }
+}
+
+#[async_trait]
+impl SandboxProvider for HttpSandboxProvider {
+    async fn index(&self, request: &SandboxIndexRequest) -> Result<SnapshotIndex, AppError> {
+        let url = self
+            .sandbox_url
+            .join("/index-jobs")
+            .map_err(|_| AppError::Internal)?;
+        let response = timeout(
+            request.policy.max_duration(),
+            self.http.post(url).json(request).send(),
+        )
+        .await
+        .map_err(|_| {
+            AppError::BadRequest("The indexing sandbox timed out before returning a result.".into())
+        })??;
+
+        if !response.status().is_success() {
+            let body = response.text().await.unwrap_or_default();
+            warn!(body, "sandbox indexing request failed");
+            return Err(AppError::BadRequest(
+                "The indexing sandbox could not complete the repository analysis.".into(),
+            ));
+        }
+
+        response
+            .json::<SnapshotIndex>()
+            .await
+            .map_err(AppError::from)
+    }
+}
+
 #[derive(Clone)]
 struct ContainerWorkspaceProvider {
     workspace_root: PathBuf,
@@ -285,9 +390,10 @@ impl CommandExecutor for NoopCommandExecutor {
     fn execute(
         &self,
         _workspace: &MaterializedWorkspace,
-        _command: &SandboxCommand,
+        command: &SandboxCommand,
         _policy: &ExecutionPolicy,
     ) -> Result<CommandResult, AppError> {
+        let _ = (&command.program, &command.args);
         Ok(CommandResult::default())
     }
 }
@@ -405,6 +511,93 @@ impl Indexer for TreeSitterIndexer {
     }
 }
 
+pub(crate) fn execute_sandbox_index(
+    request: &SandboxIndexRequest,
+) -> Result<SnapshotIndex, AppError> {
+    let workspace_provider = ContainerWorkspaceProvider::new(
+        std::env::temp_dir().join("hotfix-mock-sandbox-workspaces"),
+    );
+    let executor = NoopCommandExecutor;
+    let indexer = TreeSitterIndexer;
+    let workspace = workspace_provider.materialize(
+        &request.artifact_path,
+        &request.base_directory,
+        &request.policy,
+    )?;
+    let command_result = executor.execute(
+        &workspace,
+        &SandboxCommand {
+            program: "index".into(),
+            args: Vec::new(),
+        },
+        &request.policy,
+    )?;
+    let _ = (
+        command_result.exit_code,
+        command_result.stdout.len(),
+        command_result.stderr.len(),
+    );
+    indexer.index(&workspace.root)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub(crate) struct SnapshotIndex {
+    modules: Vec<IndexedModule>,
+    imports: Vec<IndexedImport>,
+    symbols: Vec<IndexedSymbol>,
+    entrypoints: Vec<IndexedEntrypoint>,
+    logs: Vec<IndexedLogStatement>,
+    deploy_signals: Vec<IndexedDeploySignal>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct IndexedModule {
+    path: String,
+    language: Option<String>,
+    line_count: i32,
+    summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct IndexedImport {
+    source_path: String,
+    raw_import: String,
+    resolved_path: Option<String>,
+    import_kind: String,
+    line_number: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct IndexedSymbol {
+    path: String,
+    symbol_kind: String,
+    symbol_name: String,
+    line_number: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct IndexedEntrypoint {
+    path: String,
+    entrypoint_kind: String,
+    label: String,
+    line_number: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct IndexedLogStatement {
+    path: String,
+    level: Option<String>,
+    expression: String,
+    line_number: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct IndexedDeploySignal {
+    path: String,
+    signal_kind: String,
+    evidence: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LanguageKind {
     JavaScript,
@@ -431,66 +624,9 @@ impl LanguageKind {
     }
 }
 
-#[derive(Default)]
-struct SnapshotIndex {
-    modules: Vec<IndexedModule>,
-    imports: Vec<IndexedImport>,
-    symbols: Vec<IndexedSymbol>,
-    entrypoints: Vec<IndexedEntrypoint>,
-    logs: Vec<IndexedLogStatement>,
-    deploy_signals: Vec<IndexedDeploySignal>,
-}
-
-#[derive(Debug, Clone)]
-struct IndexedModule {
-    path: String,
-    language: Option<String>,
-    line_count: i32,
-    summary: String,
-}
-
-#[derive(Debug, Clone)]
-struct IndexedImport {
-    source_path: String,
-    raw_import: String,
-    resolved_path: Option<String>,
-    import_kind: String,
-    line_number: Option<i32>,
-}
-
-#[derive(Debug, Clone)]
-struct IndexedSymbol {
-    path: String,
-    symbol_kind: String,
-    symbol_name: String,
-    line_number: Option<i32>,
-}
-
-#[derive(Debug, Clone)]
-struct IndexedEntrypoint {
-    path: String,
-    entrypoint_kind: String,
-    label: String,
-    line_number: Option<i32>,
-}
-
-#[derive(Debug, Clone)]
-struct IndexedLogStatement {
-    path: String,
-    level: Option<String>,
-    expression: String,
-    line_number: Option<i32>,
-}
-
-#[derive(Debug, Clone)]
-struct IndexedDeploySignal {
-    path: String,
-    signal_kind: String,
-    evidence: String,
-}
-
 #[derive(Debug, FromRow)]
-struct IndexJobExecutionRow {
+struct ClaimedIndexJob {
+    job_id: Uuid,
     repo_snapshot_id: Uuid,
     node_id: Uuid,
     snapshot_artifact_key: String,
@@ -506,98 +642,117 @@ struct ProviderTokenRow {
     access_token_ciphertext: Vec<u8>,
 }
 
-async fn enqueue_pending_jobs(db: &PgPool, tx: &mpsc::Sender<Uuid>) -> Result<(), AppError> {
-    let job_ids = sqlx::query_scalar::<_, Uuid>(
-        r#"
-        select id
-        from index_jobs
-        where status in ('queued', 'running')
-        order by created_at asc
-        "#,
-    )
-    .fetch_all(db)
-    .await?;
-
-    for job_id in job_ids {
-        tx.send(job_id).await.map_err(|_| AppError::Internal)?;
-    }
-
-    Ok(())
-}
-
-async fn run_index_job(
+async fn claim_next_index_job(
     db: &PgPool,
-    resolver: &dyn SnapshotResolver,
-    workspace_provider: &ContainerWorkspaceProvider,
-    executor: &NoopCommandExecutor,
-    indexer: &TreeSitterIndexer,
-    policy: &ExecutionPolicy,
-    job_id: Uuid,
-) -> Result<(), AppError> {
-    let job = load_index_job(db, job_id).await?;
-    if job.indexed_at.is_some() {
-        mark_snapshot_jobs_completed(db, job.repo_snapshot_id, &job.commit_sha).await?;
-        return Ok(());
-    }
+    claimer_id: &str,
+    lease_seconds: i32,
+) -> Result<Option<ClaimedIndexJob>, AppError> {
+    let mut tx = db.begin().await?;
 
-    mark_index_job_running(db, job.repo_snapshot_id).await?;
-    let artifact_path = resolver.ensure_artifact(&job).await?;
-    mark_index_job_progress(db, job.repo_snapshot_id, 35).await?;
-
-    let policy_for_blocking = policy.clone();
-    let artifact_for_blocking = artifact_path.clone();
-    let base_directory = job.base_directory.clone();
-    let workspace_provider = workspace_provider.clone();
-    let executor = *executor;
-    let indexer = indexer.clone();
-    let result = timeout(
-        policy.max_duration,
-        tokio::task::spawn_blocking(move || {
-            let workspace = workspace_provider.materialize(
-                &artifact_for_blocking,
-                &base_directory,
-                &policy_for_blocking,
-            )?;
-            let _ = executor.execute(
-                &workspace,
-                &SandboxCommand {
-                    program: "index".into(),
-                    args: Vec::new(),
-                },
-                &policy_for_blocking,
-            )?;
-            indexer.index(&workspace.root)
-        }),
-    )
-    .await
-    .map_err(|_| AppError::BadRequest("Indexing timed out for this repository snapshot.".into()))?
-    .map_err(|_| AppError::Internal)??;
-
-    persist_snapshot_index(db, job.repo_snapshot_id, &result).await?;
-    mark_snapshot_jobs_completed(db, job.repo_snapshot_id, &job.commit_sha).await?;
-    Ok(())
-}
-
-async fn load_index_job(db: &PgPool, job_id: Uuid) -> Result<IndexJobExecutionRow, AppError> {
-    sqlx::query_as::<_, IndexJobExecutionRow>(
+    let claimed = sqlx::query_as::<_, ClaimedIndexJob>(
         r#"
+        with candidate_snapshot as (
+            select repo_snapshots.id
+            from repo_snapshots
+            where repo_snapshots.indexed_at is null
+              and exists (
+                  select 1
+                  from index_jobs
+                  where index_jobs.repo_snapshot_id = repo_snapshots.id
+                    and (
+                        index_jobs.status = 'queued'
+                        or (
+                            index_jobs.status = 'running'
+                            and (
+                                index_jobs.lease_expires_at is null
+                                or index_jobs.lease_expires_at <= now()
+                            )
+                        )
+                    )
+              )
+            order by repo_snapshots.created_at asc
+            limit 1
+            for update skip locked
+        ),
+        updated_jobs as (
+            update index_jobs
+            set status = 'running',
+                progress_percentage = greatest(progress_percentage, 5),
+                started_at = coalesce(started_at, now()),
+                finished_at = null,
+                updated_at = now(),
+                error_summary = null,
+                claimed_by = $1,
+                claimed_at = now(),
+                lease_expires_at = now() + make_interval(secs => $2),
+                attempt_count = attempt_count + 1
+            where repo_snapshot_id in (select id from candidate_snapshot)
+              and (
+                  status = 'queued'
+                  or (
+                      status = 'running'
+                      and (
+                          lease_expires_at is null
+                          or lease_expires_at <= now()
+                      )
+                  )
+              )
+            returning
+                index_jobs.id as job_id,
+                index_jobs.repo_snapshot_id,
+                index_jobs.hotfix_project_graph_node_id as node_id
+        )
         select
-            repo_snapshots.id as repo_snapshot_id,
-            index_jobs.hotfix_project_graph_node_id as node_id,
+            updated_jobs.job_id,
+            updated_jobs.repo_snapshot_id,
+            updated_jobs.node_id,
             repo_snapshots.snapshot_artifact_key,
             repo_snapshots.github_repo_full_name,
             repo_snapshots.commit_sha,
             repo_snapshots.base_directory,
             repo_snapshots.indexed_at
-        from index_jobs
-        join repo_snapshots on repo_snapshots.id = index_jobs.repo_snapshot_id
-        where index_jobs.id = $1
+        from updated_jobs
+        join repo_snapshots on repo_snapshots.id = updated_jobs.repo_snapshot_id
+        order by updated_jobs.job_id asc
+        limit 1
         "#,
     )
-    .bind(job_id)
-    .fetch_optional(db)
-    .await?
-    .ok_or_else(|| AppError::NotFound("The requested indexing job was not found.".into()))
+    .bind(claimer_id)
+    .bind(lease_seconds)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(claimed)
+}
+
+async fn run_claimed_index_job(
+    db: &PgPool,
+    resolver: &dyn SnapshotResolver,
+    sandbox: &dyn SandboxProvider,
+    policy: &ExecutionPolicy,
+    claimer_id: &str,
+    job: &ClaimedIndexJob,
+) -> Result<(), AppError> {
+    if job.indexed_at.is_some() {
+        mark_snapshot_jobs_completed(db, job.repo_snapshot_id, &job.commit_sha).await?;
+        return Ok(());
+    }
+
+    let artifact_path = resolver.ensure_artifact(job).await?;
+    mark_snapshot_progress(db, job.repo_snapshot_id, 35, claimer_id).await?;
+
+    let request = SandboxIndexRequest {
+        artifact_path,
+        base_directory: job.base_directory.clone(),
+        policy: policy.clone(),
+    };
+    let result = sandbox.index(&request).await?;
+    mark_snapshot_progress(db, job.repo_snapshot_id, 80, claimer_id).await?;
+
+    persist_snapshot_index(db, job.repo_snapshot_id, &result).await?;
+    mark_snapshot_jobs_completed(db, job.repo_snapshot_id, &job.commit_sha).await?;
+    Ok(())
 }
 
 async fn load_github_access_token_for_node(
@@ -633,63 +788,30 @@ async fn load_github_access_token_for_node(
     )
 }
 
-async fn mark_index_job_running(db: &PgPool, snapshot_id: Uuid) -> Result<(), AppError> {
-    let mut tx = db.begin().await?;
-
-    sqlx::query(
-        r#"
-        update index_jobs
-        set status = 'running',
-            progress_percentage = greatest(progress_percentage, 5),
-            started_at = coalesce(started_at, now()),
-            finished_at = null,
-            updated_at = now(),
-            error_summary = null
-        where repo_snapshot_id = $1 and status in ('queued', 'running')
-        "#,
-    )
-    .bind(snapshot_id)
-    .execute(&mut *tx)
-    .await?;
-
-    sqlx::query(
-        r#"
-        update hotfix_project_graph_nodes
-        set indexing_status = 'indexing',
-            indexing_percentage = greatest(indexing_percentage, 5),
-            updated_at = now()
-        where id in (
-            select hotfix_project_graph_node_id
-            from index_jobs
-            where repo_snapshot_id = $1
-        )
-        "#,
-    )
-    .bind(snapshot_id)
-    .execute(&mut *tx)
-    .await?;
-
-    tx.commit().await?;
-    Ok(())
-}
-
-async fn mark_index_job_progress(
+async fn mark_snapshot_progress(
     db: &PgPool,
     snapshot_id: Uuid,
     progress: i32,
+    claimer_id: &str,
 ) -> Result<(), AppError> {
     let mut tx = db.begin().await?;
 
     sqlx::query(
         r#"
         update index_jobs
-        set progress_percentage = greatest(progress_percentage, $2),
-            updated_at = now()
-        where repo_snapshot_id = $1 and status = 'running'
+        set status = 'running',
+            progress_percentage = greatest(progress_percentage, $2),
+            updated_at = now(),
+            lease_expires_at = now() + make_interval(secs => $3)
+        where repo_snapshot_id = $1
+          and status = 'running'
+          and claimed_by = $4
         "#,
     )
     .bind(snapshot_id)
     .bind(progress)
+    .bind(INDEX_JOB_LEASE_SECONDS)
+    .bind(claimer_id)
     .execute(&mut *tx)
     .await?;
 
@@ -742,7 +864,10 @@ async fn mark_snapshot_jobs_completed(
             progress_percentage = 100,
             finished_at = coalesce(finished_at, now()),
             updated_at = now(),
-            error_summary = null
+            error_summary = null,
+            claimed_by = null,
+            claimed_at = null,
+            lease_expires_at = null
         where repo_snapshot_id = $1 and status in ('queued', 'running', 'completed')
         "#,
     )
@@ -773,22 +898,11 @@ async fn mark_snapshot_jobs_completed(
     Ok(())
 }
 
-async fn mark_index_job_failed(db: &PgPool, job_id: Uuid, message: &str) -> Result<(), AppError> {
-    let snapshot_id = sqlx::query_scalar::<_, Uuid>(
-        r#"
-        select repo_snapshot_id
-        from index_jobs
-        where id = $1
-        "#,
-    )
-    .bind(job_id)
-    .fetch_optional(db)
-    .await?;
-
-    let Some(snapshot_id) = snapshot_id else {
-        return Ok(());
-    };
-
+async fn mark_snapshot_failed(
+    db: &PgPool,
+    snapshot_id: Uuid,
+    message: &str,
+) -> Result<(), AppError> {
     let mut tx = db.begin().await?;
     sqlx::query(
         r#"
@@ -808,7 +922,10 @@ async fn mark_index_job_failed(db: &PgPool, job_id: Uuid, message: &str) -> Resu
         set status = 'failed',
             error_summary = $2,
             finished_at = now(),
-            updated_at = now()
+            updated_at = now(),
+            claimed_by = null,
+            claimed_at = null,
+            lease_expires_at = null
         where repo_snapshot_id = $1 and status in ('queued', 'running', 'failed')
         "#,
     )
