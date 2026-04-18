@@ -94,6 +94,71 @@ type ImportedProjectActivityPayload = {
   transactions: ImportedProjectTransactionLog[];
 };
 
+type ProjectNodeIndexingPayload = {
+  nodeId: string;
+  githubRepoFullName?: string | null;
+  githubRepoSelectedBranch?: string | null;
+  indexedCommitSha?: string | null;
+  baseDirectory?: string | null;
+  indexingStatus: string;
+  indexingPercentage: number;
+  errorSummary?: string | null;
+  snapshot?: ProjectNodeIndexedSnapshotPayload | null;
+};
+
+type ProjectNodeIndexedSnapshotPayload = {
+  id: string;
+  indexedAt: number;
+  modules: ProjectNodeIndexedModulePayload[];
+  imports: ProjectNodeIndexedImportPayload[];
+  symbols: ProjectNodeIndexedSymbolPayload[];
+  entrypoints: ProjectNodeIndexedEntrypointPayload[];
+  logStatements: ProjectNodeIndexedLogStatementPayload[];
+  deploySignals: ProjectNodeIndexedDeploySignalPayload[];
+};
+
+type ProjectNodeIndexedModulePayload = {
+  path: string;
+  language?: string | null;
+  lineCount: number;
+  summary: string;
+};
+
+type ProjectNodeIndexedImportPayload = {
+  sourcePath: string;
+  rawImport: string;
+  resolvedPath?: string | null;
+  importKind: string;
+  lineNumber?: number | null;
+};
+
+type ProjectNodeIndexedSymbolPayload = {
+  path: string;
+  symbolKind: string;
+  symbolName: string;
+  lineNumber?: number | null;
+};
+
+type ProjectNodeIndexedEntrypointPayload = {
+  path: string;
+  entrypointKind: string;
+  label: string;
+  lineNumber?: number | null;
+};
+
+type ProjectNodeIndexedLogStatementPayload = {
+  path: string;
+  level?: string | null;
+  expression: string;
+  lineNumber?: number | null;
+};
+
+type ProjectNodeIndexedDeploySignalPayload = {
+  path: string;
+  signalKind: string;
+  evidence: string;
+};
+
 type ImportedProjectErrorLog = {
   id: string;
   eventId?: string | null;
@@ -215,6 +280,17 @@ async function fetchProjectGraph(projectId: string) {
 async function fetchImportedProjectActivity(importedProjectId: string) {
   return fetchJson<ImportedProjectActivityPayload>(
     `/api/imported-sentry-projects/${importedProjectId}/activity`,
+    {
+      headers: {
+        Accept: "application/json",
+      },
+    },
+  );
+}
+
+async function fetchProjectNodeIndexing(projectId: string, nodeId: string) {
+  return fetchJson<ProjectNodeIndexingPayload>(
+    `/api/hotfix-projects/${projectId}/graph/items/${nodeId}/indexing`,
     {
       headers: {
         Accept: "application/json",
@@ -372,6 +448,31 @@ function formatActivityTimestamp(value: string) {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function formatIndexedTimestamp(value: number | null | undefined) {
+  if (value == null || Number.isNaN(value)) {
+    return "Unknown";
+  }
+
+  return new Date(value).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function formatCodeLocation(path: string, lineNumber?: number | null) {
+  return lineNumber != null ? `${path} · L${lineNumber}` : path;
+}
+
+function humanizeIndexLabel(value: string) {
+  return value
+    .split("_")
+    .filter((segment) => segment.length > 0)
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(" ");
 }
 
 function fallbackSeries(total: number | undefined, bucketCount = 12) {
@@ -1252,9 +1353,343 @@ function GraphControls(props: {
   );
 }
 
-function ProjectNodePanel(props: { node: ProjectGraphNode; onClose: () => void }) {
+function ProjectNodeIndexingTab(props: {
+  node: ProjectGraphNode;
+  payload: ProjectNodeIndexingPayload | null | undefined;
+  loading: boolean;
+  error: unknown;
+}) {
+  const snapshot = createMemo(() => props.payload?.snapshot ?? null);
+
+  return (
+    <>
+      <Show
+        when={props.node.metadata.githubRepoId}
+        fallback={
+          <div class="project-node-panel-section">
+            <div class="project-node-panel-section-header">
+              <p class="project-node-panel-section-title">Indexing results</p>
+              <span class="project-node-panel-badge">No repo</span>
+            </div>
+            <p class="project-node-panel-copyline">
+              This canvas item is not backed by a GitHub repository, so there are no indexing
+              results to show.
+            </p>
+          </div>
+        }
+      >
+        <Show when={props.loading}>
+          <div class="project-node-panel-section">
+            <p class="project-node-panel-copyline">Loading indexing results…</p>
+          </div>
+        </Show>
+
+        <Show when={props.error}>
+          {(error) => {
+            const errorValue = error();
+            return (
+              <div class="project-node-panel-section">
+                <p class="project-node-panel-copyline">
+                  {errorValue instanceof Error
+                    ? errorValue.message
+                    : "Could not load indexing results for this item."}
+                </p>
+              </div>
+            );
+          }}
+        </Show>
+
+        <Show
+          when={!props.loading && !props.error && snapshot()}
+          fallback={
+            <div class="project-node-panel-section">
+              <div class="project-node-panel-section-header">
+                <p class="project-node-panel-section-title">Current indexing state</p>
+                <span class="project-node-panel-badge">{nodeStatus(props.node)}</span>
+              </div>
+              <p class="project-node-panel-copyline">
+                Hotfix has not produced stored index data for the current commit yet.
+              </p>
+              <Show when={props.payload?.indexedCommitSha}>
+                {(commitSha) => (
+                  <p class="project-node-panel-copyline">
+                    Waiting on commit {commitSha().slice(0, 12)} from{" "}
+                    {props.payload?.githubRepoSelectedBranch ?? "the selected branch"}.
+                  </p>
+                )}
+              </Show>
+              <Show when={props.payload?.errorSummary}>
+                {(errorSummary) => <p class="project-node-panel-copyline">{errorSummary()}</p>}
+              </Show>
+            </div>
+          }
+        >
+          {(currentSnapshot) => (
+            <>
+              <div class="project-node-panel-facts project-node-panel-facts--indexing">
+                <div class="project-node-panel-fact">
+                  <p class="project-node-panel-fact-label">Indexed at</p>
+                  <p class="project-node-panel-fact-value">
+                    {formatIndexedTimestamp(currentSnapshot().indexedAt)}
+                  </p>
+                </div>
+                <div class="project-node-panel-fact">
+                  <p class="project-node-panel-fact-label">Modules</p>
+                  <p class="project-node-panel-fact-value">{currentSnapshot().modules.length}</p>
+                </div>
+                <div class="project-node-panel-fact">
+                  <p class="project-node-panel-fact-label">Imports</p>
+                  <p class="project-node-panel-fact-value">{currentSnapshot().imports.length}</p>
+                </div>
+                <div class="project-node-panel-fact">
+                  <p class="project-node-panel-fact-label">Symbols</p>
+                  <p class="project-node-panel-fact-value">{currentSnapshot().symbols.length}</p>
+                </div>
+                <div class="project-node-panel-fact">
+                  <p class="project-node-panel-fact-label">Entrypoints</p>
+                  <p class="project-node-panel-fact-value">
+                    {currentSnapshot().entrypoints.length}
+                  </p>
+                </div>
+                <div class="project-node-panel-fact">
+                  <p class="project-node-panel-fact-label">Log statements</p>
+                  <p class="project-node-panel-fact-value">
+                    {currentSnapshot().logStatements.length}
+                  </p>
+                </div>
+                <div class="project-node-panel-fact">
+                  <p class="project-node-panel-fact-label">Deploy signals</p>
+                  <p class="project-node-panel-fact-value">
+                    {currentSnapshot().deploySignals.length}
+                  </p>
+                </div>
+              </div>
+
+              <div class="project-node-panel-section">
+                <div class="project-node-panel-section-header">
+                  <p class="project-node-panel-section-title">Entrypoints</p>
+                  <span class="project-node-panel-badge">
+                    {currentSnapshot().entrypoints.length}
+                  </span>
+                </div>
+                <Show
+                  when={currentSnapshot().entrypoints.length > 0}
+                  fallback={
+                    <p class="project-node-panel-copyline">
+                      No entrypoints or route-like callsites were extracted for this snapshot.
+                    </p>
+                  }
+                >
+                  <div class="project-node-panel-code-list">
+                    <For each={currentSnapshot().entrypoints}>
+                      {(entrypoint) => (
+                        <article class="project-node-panel-code-item">
+                          <div class="project-node-panel-code-topline">
+                            <p class="project-node-panel-code-title">{entrypoint.label}</p>
+                            <span class="project-node-panel-log-chip">
+                              {humanizeIndexLabel(entrypoint.entrypointKind)}
+                            </span>
+                          </div>
+                          <p class="project-node-panel-code-meta">
+                            {formatCodeLocation(entrypoint.path, entrypoint.lineNumber)}
+                          </p>
+                        </article>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+              </div>
+
+              <div class="project-node-panel-section">
+                <div class="project-node-panel-section-header">
+                  <p class="project-node-panel-section-title">Deployment signals</p>
+                  <span class="project-node-panel-badge">
+                    {currentSnapshot().deploySignals.length}
+                  </span>
+                </div>
+                <Show
+                  when={currentSnapshot().deploySignals.length > 0}
+                  fallback={
+                    <p class="project-node-panel-copyline">
+                      No deployment manifests or platform configuration files were detected.
+                    </p>
+                  }
+                >
+                  <div class="project-node-panel-code-list">
+                    <For each={currentSnapshot().deploySignals}>
+                      {(signal) => (
+                        <article class="project-node-panel-code-item">
+                          <div class="project-node-panel-code-topline">
+                            <p class="project-node-panel-code-title">
+                              {humanizeIndexLabel(signal.signalKind)}
+                            </p>
+                            <span class="project-node-panel-log-chip">Detected</span>
+                          </div>
+                          <p class="project-node-panel-code-meta">{signal.path}</p>
+                          <p class="project-node-panel-code-subline">{signal.evidence}</p>
+                        </article>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+              </div>
+
+              <div class="project-node-panel-section">
+                <div class="project-node-panel-section-header">
+                  <p class="project-node-panel-section-title">Module summaries</p>
+                  <span class="project-node-panel-badge">{currentSnapshot().modules.length}</span>
+                </div>
+                <Show
+                  when={currentSnapshot().modules.length > 0}
+                  fallback={
+                    <p class="project-node-panel-copyline">
+                      No module summaries are available for this snapshot.
+                    </p>
+                  }
+                >
+                  <div class="project-node-panel-code-list">
+                    <For each={currentSnapshot().modules}>
+                      {(module) => (
+                        <article class="project-node-panel-code-item">
+                          <div class="project-node-panel-code-topline">
+                            <p class="project-node-panel-code-title">{module.path}</p>
+                            <span class="project-node-panel-log-chip">
+                              {(module.language ?? "config").toUpperCase()} · {module.lineCount}{" "}
+                              lines
+                            </span>
+                          </div>
+                          <p class="project-node-panel-code-meta">{module.summary}</p>
+                        </article>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+              </div>
+
+              <div class="project-node-panel-section">
+                <div class="project-node-panel-section-header">
+                  <p class="project-node-panel-section-title">Import graph edges</p>
+                  <span class="project-node-panel-badge">{currentSnapshot().imports.length}</span>
+                </div>
+                <Show
+                  when={currentSnapshot().imports.length > 0}
+                  fallback={
+                    <p class="project-node-panel-copyline">
+                      No imports were extracted for this snapshot.
+                    </p>
+                  }
+                >
+                  <div class="project-node-panel-code-list">
+                    <For each={currentSnapshot().imports}>
+                      {(item) => (
+                        <article class="project-node-panel-code-item">
+                          <div class="project-node-panel-code-topline">
+                            <p class="project-node-panel-code-title">{item.rawImport}</p>
+                            <span class="project-node-panel-log-chip">
+                              {humanizeIndexLabel(item.importKind)}
+                            </span>
+                          </div>
+                          <p class="project-node-panel-code-meta">
+                            {formatCodeLocation(item.sourcePath, item.lineNumber)}
+                          </p>
+                          <p class="project-node-panel-code-subline">
+                            {item.resolvedPath
+                              ? `Resolves to ${item.resolvedPath}`
+                              : "External or unresolved import"}
+                          </p>
+                        </article>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+              </div>
+
+              <div class="project-node-panel-section">
+                <div class="project-node-panel-section-header">
+                  <p class="project-node-panel-section-title">Symbols</p>
+                  <span class="project-node-panel-badge">{currentSnapshot().symbols.length}</span>
+                </div>
+                <Show
+                  when={currentSnapshot().symbols.length > 0}
+                  fallback={
+                    <p class="project-node-panel-copyline">
+                      No named symbols were extracted for this snapshot.
+                    </p>
+                  }
+                >
+                  <div class="project-node-panel-code-list">
+                    <For each={currentSnapshot().symbols}>
+                      {(symbol) => (
+                        <article class="project-node-panel-code-item">
+                          <div class="project-node-panel-code-topline">
+                            <p class="project-node-panel-code-title">{symbol.symbolName}</p>
+                            <span class="project-node-panel-log-chip">
+                              {humanizeIndexLabel(symbol.symbolKind)}
+                            </span>
+                          </div>
+                          <p class="project-node-panel-code-meta">
+                            {formatCodeLocation(symbol.path, symbol.lineNumber)}
+                          </p>
+                        </article>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+              </div>
+
+              <div class="project-node-panel-section">
+                <div class="project-node-panel-section-header">
+                  <p class="project-node-panel-section-title">Log statements</p>
+                  <span class="project-node-panel-badge">
+                    {currentSnapshot().logStatements.length}
+                  </span>
+                </div>
+                <Show
+                  when={currentSnapshot().logStatements.length > 0}
+                  fallback={
+                    <p class="project-node-panel-copyline">
+                      No logging statements were extracted for this snapshot.
+                    </p>
+                  }
+                >
+                  <div class="project-node-panel-code-list">
+                    <For each={currentSnapshot().logStatements}>
+                      {(statement) => (
+                        <article class="project-node-panel-code-item">
+                          <div class="project-node-panel-code-topline">
+                            <p class="project-node-panel-code-title">
+                              {statement.level
+                                ? `${statement.level.toUpperCase()} log`
+                                : "Log statement"}
+                            </p>
+                            <span class="project-node-panel-log-chip">Source</span>
+                          </div>
+                          <p class="project-node-panel-code-meta">
+                            {formatCodeLocation(statement.path, statement.lineNumber)}
+                          </p>
+                          <p class="project-node-panel-code-subline">{statement.expression}</p>
+                        </article>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+              </div>
+            </>
+          )}
+        </Show>
+      </Show>
+    </>
+  );
+}
+
+function ProjectNodePanel(props: {
+  projectId: string;
+  node: ProjectGraphNode;
+  onClose: () => void;
+}) {
+  const [activeTab, setActiveTab] = createSignal<"overview" | "indexing">("overview");
   const [activity] = createResource(
-    () => props.node.importedSentryProjectId,
+    () => (activeTab() === "overview" ? props.node.importedSentryProjectId : null),
     async (importedProjectId) => {
       if (!importedProjectId) {
         return null;
@@ -1262,6 +1697,31 @@ function ProjectNodePanel(props: { node: ProjectGraphNode; onClose: () => void }
 
       return fetchImportedProjectActivity(importedProjectId);
     },
+  );
+  const [indexing] = createResource(
+    () => {
+      if (activeTab() !== "indexing" || !props.node.metadata.githubRepoId) {
+        return null;
+      }
+
+      return {
+        projectId: props.projectId,
+        nodeId: props.node.id,
+        indexedCommitSha: props.node.metadata.indexedCommitSha ?? "",
+        indexingStatus: props.node.metadata.indexingStatus ?? "pending",
+        indexingPercentage: props.node.metadata.indexingPercentage ?? 0,
+      };
+    },
+    async (source) => fetchProjectNodeIndexing(source.projectId, source.nodeId),
+  );
+
+  createEffect(
+    on(
+      () => props.node.id,
+      () => {
+        setActiveTab("overview");
+      },
+    ),
   );
 
   return (
@@ -1287,124 +1747,165 @@ function ProjectNodePanel(props: { node: ProjectGraphNode; onClose: () => void }
         </button>
       </header>
 
+      <div class="project-node-panel-tabs" role="tablist" aria-label="Item details">
+        <button
+          class="project-node-panel-tab"
+          classList={{ "is-active": activeTab() === "overview" }}
+          type="button"
+          role="tab"
+          aria-selected={activeTab() === "overview"}
+          onClick={() => setActiveTab("overview")}
+        >
+          Overview
+        </button>
+        <button
+          class="project-node-panel-tab"
+          classList={{ "is-active": activeTab() === "indexing" }}
+          type="button"
+          role="tab"
+          aria-selected={activeTab() === "indexing"}
+          onClick={() => setActiveTab("indexing")}
+        >
+          Indexing
+        </button>
+      </div>
+
       <div class="project-node-panel-body">
-        <div class="project-node-panel-facts">
-          <For each={panelFacts(props.node)}>
-            {(fact) => (
-              <div class="project-node-panel-fact">
-                <p class="project-node-panel-fact-label">{fact.label}</p>
-                <p class="project-node-panel-fact-value">{fact.value}</p>
+        <Show
+          when={activeTab() === "overview"}
+          fallback={
+            <ProjectNodeIndexingTab
+              node={props.node}
+              payload={indexing()}
+              loading={indexing.loading}
+              error={indexing.error}
+            />
+          }
+        >
+          <>
+            <div class="project-node-panel-facts">
+              <For each={panelFacts(props.node)}>
+                {(fact) => (
+                  <div class="project-node-panel-fact">
+                    <p class="project-node-panel-fact-label">{fact.label}</p>
+                    <p class="project-node-panel-fact-value">{fact.value}</p>
+                  </div>
+                )}
+              </For>
+            </div>
+
+            <div class="project-node-panel-section">
+              <div class="project-node-panel-section-header">
+                <p class="project-node-panel-section-title">Recent errors & events</p>
+                <span class="project-node-panel-badge">24h</span>
               </div>
-            )}
-          </For>
-        </div>
 
-        <div class="project-node-panel-section">
-          <div class="project-node-panel-section-header">
-            <p class="project-node-panel-section-title">Recent errors & events</p>
-            <span class="project-node-panel-badge">24h</span>
-          </div>
+              <Show when={!props.node.importedSentryProjectId}>
+                <p class="project-node-panel-copyline">
+                  This item is not linked to a Sentry project yet. Connect one from the item modal
+                  or project settings.
+                </p>
+              </Show>
 
-          <Show when={!props.node.importedSentryProjectId}>
-            <p class="project-node-panel-copyline">
-              This item is not linked to a Sentry project yet. Connect one from the item modal or
-              project settings.
-            </p>
-          </Show>
+              <Show when={activity.loading}>
+                <p class="project-node-panel-copyline">Loading Sentry activity…</p>
+              </Show>
 
-          <Show when={activity.loading}>
-            <p class="project-node-panel-copyline">Loading Sentry activity…</p>
-          </Show>
-
-          <Show when={activity.error}>
-            {(error) => (
-              <p class="project-node-panel-copyline">
-                {error() instanceof Error
-                  ? error().message
-                  : "Could not load recent Sentry events."}
-              </p>
-            )}
-          </Show>
-
-          <Show
-            when={!activity.loading && !activity.error && (activity()?.errors.length ?? 0) === 0}
-          >
-            <p class="project-node-panel-copyline">
-              No recent Sentry error events were returned for this project.
-            </p>
-          </Show>
-
-          <div class="project-node-panel-log-list">
-            <For each={activity()?.errors ?? []}>
-              {(entry) => (
-                <article class="project-node-panel-log-item">
-                  <div class="project-node-panel-log-copy">
-                    <div class="project-node-panel-log-topline">
-                      <p class="project-node-panel-log-title">{entry.title}</p>
-                      <Show when={entry.level}>
-                        <span class="project-node-panel-log-chip">{entry.level}</span>
-                      </Show>
-                    </div>
-                    <Show when={entry.culprit}>
-                      <p class="project-node-panel-log-subtitle">{entry.culprit}</p>
-                    </Show>
-                  </div>
-                  <p class="project-node-panel-log-meta">
-                    {formatActivityTimestamp(entry.timestamp)}
+              <Show when={activity.error}>
+                {(error) => (
+                  <p class="project-node-panel-copyline">
+                    {error() instanceof Error
+                      ? error().message
+                      : "Could not load recent Sentry events."}
                   </p>
-                </article>
-              )}
-            </For>
-          </div>
-        </div>
+                )}
+              </Show>
 
-        <div class="project-node-panel-section">
-          <div class="project-node-panel-section-header">
-            <p class="project-node-panel-section-title">Transaction activity</p>
-            <span class="project-node-panel-badge">Esc closes</span>
-          </div>
+              <Show
+                when={
+                  !activity.loading && !activity.error && (activity()?.errors.length ?? 0) === 0
+                }
+              >
+                <p class="project-node-panel-copyline">
+                  No recent Sentry error events were returned for this project.
+                </p>
+              </Show>
 
-          <Show when={!props.node.importedSentryProjectId}>
-            <p class="project-node-panel-copyline">
-              Link a Sentry project to this item if you want Hotfix to surface its transactions
-              here.
-            </p>
-          </Show>
+              <div class="project-node-panel-log-list">
+                <For each={activity()?.errors ?? []}>
+                  {(entry) => (
+                    <article class="project-node-panel-log-item">
+                      <div class="project-node-panel-log-copy">
+                        <div class="project-node-panel-log-topline">
+                          <p class="project-node-panel-log-title">{entry.title}</p>
+                          <Show when={entry.level}>
+                            <span class="project-node-panel-log-chip">{entry.level}</span>
+                          </Show>
+                        </div>
+                        <Show when={entry.culprit}>
+                          <p class="project-node-panel-log-subtitle">{entry.culprit}</p>
+                        </Show>
+                      </div>
+                      <p class="project-node-panel-log-meta">
+                        {formatActivityTimestamp(entry.timestamp)}
+                      </p>
+                    </article>
+                  )}
+                </For>
+              </div>
+            </div>
 
-          <Show when={activity.loading}>
-            <p class="project-node-panel-copyline">Loading Sentry transactions…</p>
-          </Show>
+            <div class="project-node-panel-section">
+              <div class="project-node-panel-section-header">
+                <p class="project-node-panel-section-title">Transaction activity</p>
+                <span class="project-node-panel-badge">Esc closes</span>
+              </div>
 
-          <Show
-            when={
-              !activity.loading && !activity.error && (activity()?.transactions.length ?? 0) === 0
-            }
-          >
-            <p class="project-node-panel-copyline">
-              No transaction activity was returned for this project in the last 24 hours.
-            </p>
-          </Show>
+              <Show when={!props.node.importedSentryProjectId}>
+                <p class="project-node-panel-copyline">
+                  Link a Sentry project to this item if you want Hotfix to surface its transactions
+                  here.
+                </p>
+              </Show>
 
-          <div class="project-node-panel-log-list">
-            <For each={activity()?.transactions ?? []}>
-              {(entry) => (
-                <article class="project-node-panel-log-item is-transaction">
-                  <div class="project-node-panel-log-copy">
-                    <div class="project-node-panel-log-topline">
-                      <p class="project-node-panel-log-title">{entry.name}</p>
-                      <span class="project-node-panel-log-chip">
-                        {formatMetricCount(entry.count)} hits
-                      </span>
-                    </div>
-                    <p class="project-node-panel-log-subtitle">
-                      Average duration {formatDuration(entry.avgDurationMs)}
-                    </p>
-                  </div>
-                </article>
-              )}
-            </For>
-          </div>
-        </div>
+              <Show when={activity.loading}>
+                <p class="project-node-panel-copyline">Loading Sentry transactions…</p>
+              </Show>
+
+              <Show
+                when={
+                  !activity.loading &&
+                  !activity.error &&
+                  (activity()?.transactions.length ?? 0) === 0
+                }
+              >
+                <p class="project-node-panel-copyline">
+                  No transaction activity was returned for this project in the last 24 hours.
+                </p>
+              </Show>
+
+              <div class="project-node-panel-log-list">
+                <For each={activity()?.transactions ?? []}>
+                  {(entry) => (
+                    <article class="project-node-panel-log-item is-transaction">
+                      <div class="project-node-panel-log-copy">
+                        <div class="project-node-panel-log-topline">
+                          <p class="project-node-panel-log-title">{entry.name}</p>
+                          <span class="project-node-panel-log-chip">
+                            {formatMetricCount(entry.count)} hits
+                          </span>
+                        </div>
+                        <p class="project-node-panel-log-subtitle">
+                          Average duration {formatDuration(entry.avgDurationMs)}
+                        </p>
+                      </div>
+                    </article>
+                  )}
+                </For>
+              </div>
+            </div>
+          </>
+        </Show>
       </div>
     </aside>
   );
@@ -2473,6 +2974,7 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
       <Show when={selectedNode()}>
         {(node) => (
           <ProjectNodePanel
+            projectId={props.projectId}
             node={node()}
             onClose={() => {
               setSelectedNodeId(null);

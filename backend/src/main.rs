@@ -1144,6 +1144,87 @@ struct ImportedProjectTransactionLogPayload {
     avg_duration_ms: Option<f64>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectNodeIndexingPayload {
+    node_id: Uuid,
+    github_repo_full_name: Option<String>,
+    github_repo_selected_branch: Option<String>,
+    indexed_commit_sha: Option<String>,
+    base_directory: Option<String>,
+    indexing_status: String,
+    indexing_percentage: i32,
+    error_summary: Option<String>,
+    snapshot: Option<ProjectNodeIndexedSnapshotPayload>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectNodeIndexedSnapshotPayload {
+    id: Uuid,
+    indexed_at: i64,
+    modules: Vec<ProjectNodeIndexedModulePayload>,
+    imports: Vec<ProjectNodeIndexedImportPayload>,
+    symbols: Vec<ProjectNodeIndexedSymbolPayload>,
+    entrypoints: Vec<ProjectNodeIndexedEntrypointPayload>,
+    log_statements: Vec<ProjectNodeIndexedLogStatementPayload>,
+    deploy_signals: Vec<ProjectNodeIndexedDeploySignalPayload>,
+}
+
+#[derive(Debug, Serialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct ProjectNodeIndexedModulePayload {
+    path: String,
+    language: Option<String>,
+    line_count: i32,
+    summary: String,
+}
+
+#[derive(Debug, Serialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct ProjectNodeIndexedImportPayload {
+    source_path: String,
+    raw_import: String,
+    resolved_path: Option<String>,
+    import_kind: String,
+    line_number: Option<i32>,
+}
+
+#[derive(Debug, Serialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct ProjectNodeIndexedSymbolPayload {
+    path: String,
+    symbol_kind: String,
+    symbol_name: String,
+    line_number: Option<i32>,
+}
+
+#[derive(Debug, Serialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct ProjectNodeIndexedEntrypointPayload {
+    path: String,
+    entrypoint_kind: String,
+    label: String,
+    line_number: Option<i32>,
+}
+
+#[derive(Debug, Serialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct ProjectNodeIndexedLogStatementPayload {
+    path: String,
+    level: Option<String>,
+    expression: String,
+    line_number: Option<i32>,
+}
+
+#[derive(Debug, Serialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+struct ProjectNodeIndexedDeploySignalPayload {
+    path: String,
+    signal_kind: String,
+    evidence: String,
+}
+
 #[derive(Debug, FromRow)]
 struct ImportedProjectActivityRow {
     name: String,
@@ -1151,6 +1232,20 @@ struct ImportedProjectActivityRow {
     sentry_project_id: String,
     sentry_connection_id: Uuid,
     sentry_organization_slug: String,
+}
+
+#[derive(Debug, FromRow)]
+struct ProjectNodeIndexingRow {
+    node_id: Uuid,
+    github_repo_full_name: Option<String>,
+    github_repo_selected_branch: Option<String>,
+    indexed_commit_sha: Option<String>,
+    base_directory: Option<String>,
+    indexing_status: String,
+    indexing_percentage: i32,
+    error_summary: Option<String>,
+    repo_snapshot_id: Option<Uuid>,
+    snapshot_indexed_at: Option<OffsetDateTime>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1330,6 +1425,10 @@ async fn run_api() -> Result<(), AppError> {
         .route(
             "/hotfix-projects/{project_id}/graph/items",
             post(create_project_graph_item),
+        )
+        .route(
+            "/hotfix-projects/{project_id}/graph/items/{node_id}/indexing",
+            get(get_project_graph_item_indexing),
         )
         .route(
             "/hotfix-projects/{project_id}/graph/edges",
@@ -1948,6 +2047,146 @@ async fn create_project_graph_item(
 
     let payload = build_project_graph_payload(&state.db, project_id).await?;
     Ok(Json(payload))
+}
+
+async fn get_project_graph_item_indexing(
+    State(state): State<AppState>,
+    session: Session,
+    AxumPath((project_id, node_id)): AxumPath<(Uuid, Uuid)>,
+) -> Result<Json<ProjectNodeIndexingPayload>, AppError> {
+    let user_id = require_user_id(&session).await?;
+    ensure_hotfix_project_owner(&state.db, user_id, project_id).await?;
+
+    let payload = build_project_graph_item_indexing_payload(&state.db, project_id, node_id).await?;
+    Ok(Json(payload))
+}
+
+async fn build_project_graph_item_indexing_payload(
+    db: &PgPool,
+    project_id: Uuid,
+    node_id: Uuid,
+) -> Result<ProjectNodeIndexingPayload, AppError> {
+    let row = sqlx::query_as::<_, ProjectNodeIndexingRow>(
+        r#"
+        select
+            hotfix_project_graph_nodes.id as node_id,
+            hotfix_project_graph_nodes.github_repo_full_name,
+            hotfix_project_graph_nodes.github_repo_selected_branch,
+            hotfix_project_graph_nodes.indexed_commit_sha,
+            hotfix_project_graph_nodes.base_directory,
+            hotfix_project_graph_nodes.indexing_status,
+            hotfix_project_graph_nodes.indexing_percentage,
+            repo_snapshots.last_error as error_summary,
+            repo_snapshots.id as repo_snapshot_id,
+            repo_snapshots.indexed_at as snapshot_indexed_at
+        from hotfix_project_graph_nodes
+        left join repo_snapshots
+            on repo_snapshots.github_repo_id = hotfix_project_graph_nodes.github_repo_id
+           and repo_snapshots.github_repo_selected_branch = hotfix_project_graph_nodes.github_repo_selected_branch
+           and repo_snapshots.commit_sha = hotfix_project_graph_nodes.indexed_commit_sha
+           and repo_snapshots.base_directory = coalesce(hotfix_project_graph_nodes.base_directory, '')
+        where hotfix_project_graph_nodes.hotfix_project_id = $1
+          and hotfix_project_graph_nodes.id = $2
+        limit 1
+        "#,
+    )
+    .bind(project_id)
+    .bind(node_id)
+    .fetch_optional(db)
+    .await?
+    .ok_or_else(|| AppError::NotFound("The requested graph item was not found.".into()))?;
+
+    let snapshot = if let (Some(snapshot_id), Some(indexed_at)) =
+        (row.repo_snapshot_id, row.snapshot_indexed_at)
+    {
+        let (modules, imports, symbols, entrypoints, log_statements, deploy_signals) = tokio::try_join!(
+            sqlx::query_as::<_, ProjectNodeIndexedModulePayload>(
+                r#"
+                    select path, language, line_count, summary
+                    from repo_snapshot_modules
+                    where repo_snapshot_id = $1
+                    order by path asc
+                    "#,
+            )
+            .bind(snapshot_id)
+            .fetch_all(db),
+            sqlx::query_as::<_, ProjectNodeIndexedImportPayload>(
+                r#"
+                    select source_path, raw_import, resolved_path, import_kind, line_number
+                    from repo_snapshot_imports
+                    where repo_snapshot_id = $1
+                    order by source_path asc, line_number asc nulls last, raw_import asc
+                    "#,
+            )
+            .bind(snapshot_id)
+            .fetch_all(db),
+            sqlx::query_as::<_, ProjectNodeIndexedSymbolPayload>(
+                r#"
+                    select path, symbol_kind, symbol_name, line_number
+                    from repo_snapshot_symbols
+                    where repo_snapshot_id = $1
+                    order by path asc, line_number asc nulls last, symbol_name asc
+                    "#,
+            )
+            .bind(snapshot_id)
+            .fetch_all(db),
+            sqlx::query_as::<_, ProjectNodeIndexedEntrypointPayload>(
+                r#"
+                    select path, entrypoint_kind, label, line_number
+                    from repo_snapshot_entrypoints
+                    where repo_snapshot_id = $1
+                    order by path asc, line_number asc nulls last, label asc
+                    "#,
+            )
+            .bind(snapshot_id)
+            .fetch_all(db),
+            sqlx::query_as::<_, ProjectNodeIndexedLogStatementPayload>(
+                r#"
+                    select path, level, expression, line_number
+                    from repo_snapshot_log_statements
+                    where repo_snapshot_id = $1
+                    order by path asc, line_number asc nulls last
+                    "#,
+            )
+            .bind(snapshot_id)
+            .fetch_all(db),
+            sqlx::query_as::<_, ProjectNodeIndexedDeploySignalPayload>(
+                r#"
+                    select path, signal_kind, evidence
+                    from repo_snapshot_deploy_signals
+                    where repo_snapshot_id = $1
+                    order by path asc, signal_kind asc
+                    "#,
+            )
+            .bind(snapshot_id)
+            .fetch_all(db),
+        )?;
+
+        Some(ProjectNodeIndexedSnapshotPayload {
+            id: snapshot_id,
+            indexed_at: (indexed_at.unix_timestamp_nanos() / 1_000_000) as i64,
+            modules,
+            imports,
+            symbols,
+            entrypoints,
+            log_statements,
+            deploy_signals,
+        })
+    } else {
+        None
+    };
+
+    Ok(ProjectNodeIndexingPayload {
+        node_id: row.node_id,
+        github_repo_full_name: row.github_repo_full_name,
+        github_repo_selected_branch: row.github_repo_selected_branch,
+        indexed_commit_sha: row.indexed_commit_sha,
+        base_directory: row.base_directory,
+        indexing_status: row.indexing_status,
+        indexing_percentage: row.indexing_percentage,
+        error_summary: row.error_summary,
+        snapshot,
+    })
 }
 
 async fn schedule_snapshot_for_node(
