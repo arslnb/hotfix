@@ -1425,9 +1425,9 @@ function ProjectsTab(props: {
               <div class="projects-header-block">
                 <div class="projects-header">
                   <div class="projects-header-copy">
-                    <h1 class="projects-title">Project Map</h1>
+                    <h1 class="projects-title">Hotfix</h1>
                     <p class="projects-subtitle">
-                      Create a project and map the repos, services, and telemetry behind it.
+                      Map the repos, services, and telemetry behind your software.
                     </p>
                   </div>
 
@@ -1498,39 +1498,6 @@ function ProjectsTab(props: {
               </div>
 
               <div class="projects-toolbar">
-                <div class="projects-toolbar-meta">
-                  <span class="projects-toolbar-icon" aria-hidden="true">
-                    <svg viewBox="0 0 16 16" fill="none">
-                      <path
-                        d="M3 3.25h3v3H3v-3Zm7 0h3v3h-3v-3ZM3 9.75h3v3H3v-3Zm7 0h3v3h-3v-3Z"
-                        stroke="currentColor"
-                        stroke-width="1.1"
-                      />
-                    </svg>
-                  </span>
-                  <span>{sortedProjects().length} Projects</span>
-                  <span class="projects-toolbar-divider" aria-hidden="true" />
-                  <label class="projects-sort-label" for="projects-sort">
-                    Sort by:
-                  </label>
-                  <div class="projects-select-wrap">
-                    <select
-                      id="projects-sort"
-                      class="projects-select"
-                      value={sortBy()}
-                      onInput={(event) => setSortBy(event.currentTarget.value as ProjectsSort)}
-                    >
-                      <option value="created">Date Created</option>
-                      <option value="alphabetical">Alphabetical</option>
-                    </select>
-                    <span class="projects-select-caret" aria-hidden="true">
-                      <svg viewBox="0 0 16 16" fill="none">
-                        <path d="m4.25 6.25 3.75 3.75 3.75-3.75" stroke="currentColor" stroke-width="1.15" />
-                      </svg>
-                    </span>
-                  </div>
-                </div>
-
                 <div class="projects-view-toggle" role="tablist" aria-label="Project layout">
                   <button
                     class="projects-view-button"
@@ -1605,72 +1572,100 @@ function ProjectsTab(props: {
                 <Show
                   when={viewMode() === "grid"}
                   fallback={
-                    <div class="projects-collection">
-                      <For each={sortedProjects()}>
-                        {(project) => (
-                          <article
-                            class="project-card"
-                            classList={{
-                              "is-selected": selectedProjectId() === project.id,
-                            }}
-                            aria-selected={selectedProjectId() === project.id}
-                            onMouseEnter={() => setSelectedProjectId(project.id)}
-                          >
-                            <button
-                              class="project-card-main"
-                              type="button"
-                              onFocus={() => setSelectedProjectId(project.id)}
-                              onClick={() => openProject(project.id)}
+                    <div class="projects-table">
+                      <div class="projects-table-header" role="row">
+                        <button
+                          class="projects-table-header-button"
+                          classList={{ "is-active": sortBy() === "alphabetical" }}
+                          type="button"
+                          onClick={() => setSortBy("alphabetical")}
+                        >
+                          <span>Name</span>
+                        </button>
+                        <button
+                          class="projects-table-header-button"
+                          classList={{ "is-active": sortBy() === "created" }}
+                          type="button"
+                          onClick={() => setSortBy("created")}
+                        >
+                          <span>Created at</span>
+                        </button>
+                        <div class="projects-table-header-label">Activity</div>
+                        <div class="projects-table-header-spacer" aria-hidden="true" />
+                      </div>
+
+                      <div class="projects-collection is-table">
+                        <For each={sortedProjects()}>
+                          {(project) => (
+                            <article
+                              class="project-card is-table-row"
+                              classList={{
+                                "is-selected": selectedProjectId() === project.id,
+                              }}
+                              aria-selected={selectedProjectId() === project.id}
+                              onMouseEnter={() => setSelectedProjectId(project.id)}
                             >
-                              <div class="project-card-copy">
-                                <h2 class="project-card-title">{project.name}</h2>
-                                <p class="project-card-meta">{formatProjectDate(project.createdAt)}</p>
-                              </div>
-
-                              <div class="project-card-stats is-inline">
-                                <ProjectSparkline seed={`${project.id}:${project.name}`} compact={true} />
-                              </div>
-                            </button>
-
-                            <div class="project-card-menu" data-project-action-menu>
                               <button
-                                class="project-card-menu-trigger"
+                                class="project-card-main"
                                 type="button"
-                                aria-haspopup="menu"
-                                aria-expanded={projectMenuOpenId() === project.id}
-                                onClick={() =>
-                                  setProjectMenuOpenId((current) => (current === project.id ? null : project.id))
-                                }
+                                onFocus={() => setSelectedProjectId(project.id)}
+                                onClick={() => openProject(project.id)}
                               >
-                                <span />
-                                <span />
-                                <span />
+                                <div class="project-card-cell project-card-cell--name">
+                                  <h2 class="project-card-title">{project.name}</h2>
+                                </div>
+
+                                <div class="project-card-cell project-card-cell--created">
+                                  <p class="project-card-meta">{formatProjectDate(project.createdAt)}</p>
+                                </div>
+
+                                <div class="project-card-cell project-card-cell--activity">
+                                  <div class="project-card-stats is-inline">
+                                    <ProjectSparkline seed={`${project.id}:${project.name}`} compact={true} />
+                                  </div>
+                                </div>
                               </button>
 
-                              <Show when={projectMenuOpenId() === project.id}>
-                                <div class="project-card-popover" role="menu">
-                                  <button
-                                    class="project-card-popover-item"
-                                    type="button"
-                                    role="menuitem"
-                                    onClick={() => openRenameModal(project)}
-                                  >
-                                    Rename
-                                  </button>
-                                  <button
-                                    class="project-card-popover-item is-danger"
-                                    type="button"
-                                    role="menuitem"
-                                    onClick={() => openDeleteModal(project)}
-                                  >
-                                    Delete project
-                                  </button>
-                                </div>
-                              </Show>
-                            </div>
-                          </article>
-                        )}
-                      </For>
+                              <div class="project-card-menu" data-project-action-menu>
+                                <button
+                                  class="project-card-menu-trigger"
+                                  type="button"
+                                  aria-haspopup="menu"
+                                  aria-expanded={projectMenuOpenId() === project.id}
+                                  onClick={() =>
+                                    setProjectMenuOpenId((current) => (current === project.id ? null : project.id))
+                                  }
+                                >
+                                  <span />
+                                  <span />
+                                  <span />
+                                </button>
+
+                                <Show when={projectMenuOpenId() === project.id}>
+                                  <div class="project-card-popover" role="menu">
+                                    <button
+                                      class="project-card-popover-item"
+                                      type="button"
+                                      role="menuitem"
+                                      onClick={() => openRenameModal(project)}
+                                    >
+                                      Rename
+                                    </button>
+                                    <button
+                                      class="project-card-popover-item is-danger"
+                                      type="button"
+                                      role="menuitem"
+                                      onClick={() => openDeleteModal(project)}
+                                    >
+                                      Delete project
+                                    </button>
+                                  </div>
+                                </Show>
+                              </div>
+                            </article>
+                          )}
+                        </For>
+                      </div>
                     </div>
                   }
                 >
