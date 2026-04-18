@@ -646,9 +646,15 @@ button {
 
 .projects-new-button {
   min-width: 0;
+  height: 28px;
+  min-height: 28px;
+  max-height: 28px;
   gap: 0.38rem;
+  box-sizing: border-box;
+  padding-block: 0;
   padding-inline: 0.62rem;
   font-size: 0.74rem;
+  line-height: 1;
 }
 
 .projects-account-menu {
@@ -794,6 +800,7 @@ button {
   display: flex;
   flex-direction: column;
   gap: 1.6rem;
+  min-height: 100vh;
 }
 
 .projects-home-surface {
@@ -802,6 +809,7 @@ button {
   display: flex;
   flex-direction: column;
   gap: 1.6rem;
+  min-height: 100vh;
 }
 
 .projects-home-surface::before,
@@ -832,6 +840,7 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+  padding-bottom: 30px;
 }
 
 .projects-header-block {
