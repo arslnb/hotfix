@@ -1613,59 +1613,61 @@ function ProjectsTab(props: {
               <Show
                 when={sortedProjects().length > 0}
                 fallback={
-                  <div class="projects-empty-state">
-                    <div class="projects-empty-illustration" aria-hidden="true">
-                      <svg viewBox="0 0 80 80" fill="none">
-                        <rect
-                          x="18"
-                          y="16"
-                          width="44"
-                          height="48"
-                          rx="4"
-                          fill="rgba(255,255,255,0.03)"
-                        />
-                        <path
-                          d="M29 27h22M29 35h16"
-                          stroke="rgba(242,238,227,0.34)"
-                          stroke-width="2"
-                          stroke-linecap="round"
-                        />
-                        <path
-                          d="M26 52.5c4.2-5.2 8.9-7.8 14.2-7.8 5.4 0 9.9 2.6 13.8 7.8"
-                          stroke="url(#empty-graph-stroke)"
-                          stroke-width="3"
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                        />
-                        <circle cx="40.5" cy="22" r="12.5" fill="rgba(127,220,255,0.08)" />
-                        <path
-                          d="M35 22.2h4.2l2.8-4.7 3.6 9.1 2.4-4.4H52"
-                          stroke="url(#empty-graph-stroke)"
-                          stroke-width="2.4"
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                        />
-                        <defs>
-                          <linearGradient
-                            id="empty-graph-stroke"
-                            x1="24"
-                            y1="54"
-                            x2="55"
-                            y2="18"
-                            gradientUnits="userSpaceOnUse"
-                          >
-                            <stop stop-color="rgba(70,136,220,0.78)" />
-                            <stop offset="0.56" stop-color="rgba(127,220,255,0.9)" />
-                            <stop offset="1" stop-color="#a4f0ff" />
-                          </linearGradient>
-                        </defs>
-                      </svg>
+                  <div class="projects-empty-frame">
+                    <div class="projects-empty-state">
+                      <div class="projects-empty-illustration" aria-hidden="true">
+                        <svg viewBox="0 0 80 80" fill="none">
+                          <rect
+                            x="18"
+                            y="16"
+                            width="44"
+                            height="48"
+                            rx="4"
+                            fill="rgba(255,255,255,0.03)"
+                          />
+                          <path
+                            d="M29 27h22M29 35h16"
+                            stroke="rgba(242,238,227,0.34)"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                          />
+                          <path
+                            d="M26 52.5c4.2-5.2 8.9-7.8 14.2-7.8 5.4 0 9.9 2.6 13.8 7.8"
+                            stroke="url(#empty-graph-stroke)"
+                            stroke-width="3"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                          />
+                          <circle cx="40.5" cy="22" r="12.5" fill="rgba(127,220,255,0.08)" />
+                          <path
+                            d="M35 22.2h4.2l2.8-4.7 3.6 9.1 2.4-4.4H52"
+                            stroke="url(#empty-graph-stroke)"
+                            stroke-width="2.4"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                          />
+                          <defs>
+                            <linearGradient
+                              id="empty-graph-stroke"
+                              x1="24"
+                              y1="54"
+                              x2="55"
+                              y2="18"
+                              gradientUnits="userSpaceOnUse"
+                            >
+                              <stop stop-color="rgba(70,136,220,0.78)" />
+                              <stop offset="0.56" stop-color="rgba(127,220,255,0.9)" />
+                              <stop offset="1" stop-color="#a4f0ff" />
+                            </linearGradient>
+                          </defs>
+                        </svg>
+                      </div>
+                      <p class="projects-empty-title">No projects yet</p>
+                      <p class="projects-empty-copy">
+                        Create a blank project, then add repo-backed items to the canvas and
+                        optionally attach specific Sentry projects later.
+                      </p>
                     </div>
-                    <p class="projects-empty-title">No projects yet</p>
-                    <p class="projects-empty-copy">
-                      Create a blank project, then add repo-backed items to the canvas and
-                      optionally attach specific Sentry projects later.
-                    </p>
                   </div>
                 }
               >
@@ -1922,7 +1924,8 @@ function ProjectsTab(props: {
                     </div>
                   }
                 >
-                  <div class="projects-collection is-grid">
+                  <div class="projects-grid-frame">
+                    <div class="projects-collection is-grid">
                     <For each={sortedProjects()}>
                       {(project) => (
                         <article
@@ -1995,6 +1998,7 @@ function ProjectsTab(props: {
                         </article>
                       )}
                     </For>
+                    </div>
                   </div>
                 </Show>
               </Show>
@@ -2333,7 +2337,8 @@ function ProjectsHomeSkeleton(props: { viewMode: ProjectsView }) {
           </div>
         }
       >
-        <div class="projects-collection is-grid is-skeleton">
+        <div class="projects-grid-frame is-skeleton">
+          <div class="projects-collection is-grid is-skeleton">
           <For each={skeletonCards}>
             {() => (
               <article class="project-card is-grid is-skeleton">
@@ -2352,6 +2357,7 @@ function ProjectsHomeSkeleton(props: { viewMode: ProjectsView }) {
               </article>
             )}
           </For>
+          </div>
         </div>
       </Show>
     </div>
