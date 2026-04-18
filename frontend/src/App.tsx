@@ -1674,78 +1674,110 @@ function ProjectsTab(props: {
                   fallback={
                     <div class="projects-table-frame">
                       <div class="projects-table-wrap" ref={tableWrapRef}>
-                        <div class="projects-table">
-                          <div class="projects-table-header" role="row">
-                          <div class="projects-table-header-label projects-table-header-label--index">
-                            #
-                          </div>
-                          <button
-                            class="projects-table-header-button"
-                            classList={{ "is-active": sortBy() === "alphabetical" }}
-                            type="button"
-                            onClick={() => setSortBy("alphabetical")}
-                          >
-                            <span>Name</span>
-                          </button>
-                          <div class="projects-table-header-label">Health</div>
-                          <button
-                            class="projects-table-header-button"
-                            classList={{ "is-active": sortBy() === "indexing" }}
-                            type="button"
-                            onClick={() => setSortBy("indexing")}
-                          >
-                            <span>Indexing</span>
-                          </button>
-                          <button
-                            class="projects-table-header-button"
-                            classList={{ "is-active": sortBy() === "incidents" }}
-                            type="button"
-                            onClick={() => setSortBy("incidents")}
-                          >
-                            <span>Incidents</span>
-                          </button>
-                          <button
-                            class="projects-table-header-button"
-                            classList={{ "is-active": sortBy() === "lastActivity" }}
-                            type="button"
-                            onClick={() => setSortBy("lastActivity")}
-                          >
-                            <span>Last activity</span>
-                          </button>
-                          <button
-                            class="projects-table-header-button"
-                            classList={{ "is-active": sortBy() === "created" }}
-                            type="button"
-                            onClick={() => setSortBy("created")}
-                          >
-                            <span>Created at</span>
-                          </button>
-                          <div class="projects-table-header-label">Activity</div>
-                          <div class="projects-table-header-spacer" aria-hidden="true" />
-                        </div>
-
-                          <div class="projects-collection is-table">
-                          <For each={sortedProjects()}>
-                            {(project, index) => (
-                              <article
-                                class="project-card is-table-row"
-                                classList={{
-                                  "is-selected": selectedProjectId() === project.id,
-                                }}
-                                aria-selected={selectedProjectId() === project.id}
-                                onMouseEnter={() => setSelectedProjectId(project.id)}
+                        <table class="projects-table">
+                          <colgroup>
+                            <col class="projects-table-col projects-table-col--index" />
+                            <col class="projects-table-col projects-table-col--name" />
+                            <col class="projects-table-col projects-table-col--health" />
+                            <col class="projects-table-col projects-table-col--indexing" />
+                            <col class="projects-table-col projects-table-col--incidents" />
+                            <col class="projects-table-col projects-table-col--last-activity" />
+                            <col class="projects-table-col projects-table-col--created" />
+                            <col class="projects-table-col projects-table-col--activity" />
+                            <col class="projects-table-col projects-table-col--actions" />
+                          </colgroup>
+                          <thead>
+                            <tr class="projects-table-header">
+                              <th
+                                class="projects-table-header-label projects-table-header-label--index"
+                                scope="col"
                               >
+                                #
+                              </th>
+                              <th scope="col">
                                 <button
-                                  class="project-card-main"
+                                  class="projects-table-header-button"
+                                  classList={{ "is-active": sortBy() === "alphabetical" }}
                                   type="button"
+                                  onClick={() => setSortBy("alphabetical")}
+                                >
+                                  <span>Name</span>
+                                </button>
+                              </th>
+                              <th class="projects-table-header-label" scope="col">
+                                Health
+                              </th>
+                              <th scope="col">
+                                <button
+                                  class="projects-table-header-button"
+                                  classList={{ "is-active": sortBy() === "indexing" }}
+                                  type="button"
+                                  onClick={() => setSortBy("indexing")}
+                                >
+                                  <span>Indexing</span>
+                                </button>
+                              </th>
+                              <th scope="col">
+                                <button
+                                  class="projects-table-header-button"
+                                  classList={{ "is-active": sortBy() === "incidents" }}
+                                  type="button"
+                                  onClick={() => setSortBy("incidents")}
+                                >
+                                  <span>Incidents</span>
+                                </button>
+                              </th>
+                              <th scope="col">
+                                <button
+                                  class="projects-table-header-button"
+                                  classList={{ "is-active": sortBy() === "lastActivity" }}
+                                  type="button"
+                                  onClick={() => setSortBy("lastActivity")}
+                                >
+                                  <span>Last activity</span>
+                                </button>
+                              </th>
+                              <th scope="col">
+                                <button
+                                  class="projects-table-header-button"
+                                  classList={{ "is-active": sortBy() === "created" }}
+                                  type="button"
+                                  onClick={() => setSortBy("created")}
+                                >
+                                  <span>Created at</span>
+                                </button>
+                              </th>
+                              <th class="projects-table-header-label" scope="col">
+                                Activity
+                              </th>
+                              <th class="projects-table-header-spacer" scope="col" aria-hidden="true" />
+                            </tr>
+                          </thead>
+
+                          <tbody class="projects-table-body">
+                            <For each={sortedProjects()}>
+                              {(project, index) => (
+                                <tr
+                                  class="projects-table-row"
+                                  classList={{
+                                    "is-selected": selectedProjectId() === project.id,
+                                  }}
+                                  aria-selected={selectedProjectId() === project.id}
+                                  tabIndex={0}
+                                  onMouseEnter={() => setSelectedProjectId(project.id)}
                                   onFocus={() => setSelectedProjectId(project.id)}
                                   onClick={() => openProject(project.id)}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter" || event.key === " ") {
+                                      event.preventDefault();
+                                      openProject(project.id);
+                                    }
+                                  }}
                                 >
-                                  <div class="project-card-cell project-card-cell--index">
+                                  <td class="projects-table-cell projects-table-cell--index">
                                     <p class="project-card-meta">{index() + 1}</p>
-                                  </div>
-
-                                  <div class="project-card-cell project-card-cell--name">
+                                  </td>
+                                  <td class="projects-table-cell projects-table-cell--name">
                                     <div class="project-card-title-row">
                                       <h2 class="project-card-title">{project.name}</h2>
                                       <div class="project-connection-icons">
@@ -1767,9 +1799,8 @@ function ProjectsTab(props: {
                                         </Show>
                                       </div>
                                     </div>
-                                  </div>
-
-                                  <div class="project-card-cell project-card-cell--health">
+                                  </td>
+                                  <td class="projects-table-cell projects-table-cell--health">
                                     {(() => {
                                       const health = getProjectHealth(project);
                                       return (
@@ -1778,112 +1809,115 @@ function ProjectsTab(props: {
                                         </span>
                                       );
                                     })()}
-                                  </div>
-
-                                  <div class="project-card-cell project-card-cell--indexing">
+                                  </td>
+                                  <td class="projects-table-cell projects-table-cell--indexing">
                                     <p class="project-card-meta">
                                       {formatIndexingStatus(
                                         project.indexingStatus,
                                         project.indexingPercentage,
                                       )}
                                     </p>
-                                  </div>
-
-                                  <div class="project-card-cell project-card-cell--incidents">
+                                  </td>
+                                  <td class="projects-table-cell projects-table-cell--incidents">
                                     <p class="project-card-meta">{project.incidentCount}</p>
-                                  </div>
-
-                                  <div class="project-card-cell project-card-cell--last-activity">
+                                  </td>
+                                  <td class="projects-table-cell projects-table-cell--last-activity">
                                     <p class="project-card-meta">
                                       {formatProjectLastActivity(project.lastActivityAt)}
                                     </p>
-                                  </div>
-
-                                  <div class="project-card-cell project-card-cell--created">
+                                  </td>
+                                  <td class="projects-table-cell projects-table-cell--created">
                                     <p class="project-card-meta">
                                       {formatProjectDate(project.createdAt)}
                                     </p>
-                                  </div>
-
-                                  <div class="project-card-cell project-card-cell--activity">
+                                  </td>
+                                  <td class="projects-table-cell projects-table-cell--activity">
                                     <div class="project-card-stats is-inline">
                                       <ProjectSparkline
                                         seed={`${project.id}:${project.name}`}
                                         compact={true}
                                       />
                                     </div>
-                                  </div>
-                                </button>
-
-                                <div class="project-card-menu" data-project-action-menu>
-                                  <button
-                                    class="project-card-menu-trigger"
-                                    type="button"
-                                    aria-haspopup="menu"
-                                    aria-expanded={projectMenuOpenId() === project.id}
-                                    onClick={() =>
-                                      setProjectMenuOpenId((current) =>
-                                        current === project.id ? null : project.id,
-                                      )
-                                    }
+                                  </td>
+                                  <td
+                                    class="projects-table-cell projects-table-cell--actions"
+                                    data-project-action-menu
                                   >
-                                    <span />
-                                    <span />
-                                    <span />
-                                  </button>
+                                    <div class="project-card-menu">
+                                      <button
+                                        class="project-card-menu-trigger"
+                                        type="button"
+                                        aria-haspopup="menu"
+                                        aria-expanded={projectMenuOpenId() === project.id}
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          setProjectMenuOpenId((current) =>
+                                            current === project.id ? null : project.id,
+                                          );
+                                        }}
+                                      >
+                                        <span />
+                                        <span />
+                                        <span />
+                                      </button>
 
-                                  <Show when={projectMenuOpenId() === project.id}>
-                                    <div class="project-card-popover" role="menu">
-                                      <button
-                                        class="project-card-popover-item"
-                                        type="button"
-                                        role="menuitem"
-                                        onClick={() => openRenameModal(project)}
-                                      >
-                                        Rename
-                                      </button>
-                                      <button
-                                        class="project-card-popover-item is-danger"
-                                        type="button"
-                                        role="menuitem"
-                                        onClick={() => openDeleteModal(project)}
-                                      >
-                                        Delete project
-                                      </button>
+                                      <Show when={projectMenuOpenId() === project.id}>
+                                        <div class="project-card-popover" role="menu">
+                                          <button
+                                            class="project-card-popover-item"
+                                            type="button"
+                                            role="menuitem"
+                                            onClick={(event) => {
+                                              event.stopPropagation();
+                                              openRenameModal(project);
+                                            }}
+                                          >
+                                            Rename
+                                          </button>
+                                          <button
+                                            class="project-card-popover-item is-danger"
+                                            type="button"
+                                            role="menuitem"
+                                            onClick={(event) => {
+                                              event.stopPropagation();
+                                              openDeleteModal(project);
+                                            }}
+                                          >
+                                            Delete project
+                                          </button>
+                                        </div>
+                                      </Show>
                                     </div>
-                                  </Show>
-                                </div>
-                              </article>
-                            )}
-                          </For>
-                          <For each={Array.from({ length: tableFillerRows() }, (_, index) => index)}>
-                            {(index) => (
-                              <div
-                                class="project-card is-table-row is-filler"
-                                aria-hidden="true"
-                                style={{
-                                  opacity: `${Math.max(
-                                    0,
-                                    1 - (index + 1) / Math.max(tableFillerRows(), 1),
-                                  )}`,
-                                }}
-                              >
-                                <div class="project-card-main">
-                                  <div class="project-card-cell project-card-cell--index" />
-                                  <div class="project-card-cell project-card-cell--name" />
-                                  <div class="project-card-cell project-card-cell--health" />
-                                  <div class="project-card-cell project-card-cell--indexing" />
-                                  <div class="project-card-cell project-card-cell--incidents" />
-                                  <div class="project-card-cell project-card-cell--last-activity" />
-                                  <div class="project-card-cell project-card-cell--created" />
-                                  <div class="project-card-cell project-card-cell--activity" />
-                                </div>
-                                <div class="project-card-menu" />
-                              </div>
-                            )}
-                          </For>
-                          </div>
-                        </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </For>
+                            <For each={Array.from({ length: tableFillerRows() }, (_, index) => index)}>
+                              {(index) => (
+                                <tr
+                                  class="projects-table-row is-filler"
+                                  aria-hidden="true"
+                                  style={{
+                                    opacity: `${Math.max(
+                                      0,
+                                      1 - (index + 1) / Math.max(tableFillerRows(), 1),
+                                    )}`,
+                                  }}
+                                >
+                                  <td class="projects-table-cell projects-table-cell--index" />
+                                  <td class="projects-table-cell projects-table-cell--name" />
+                                  <td class="projects-table-cell projects-table-cell--health" />
+                                  <td class="projects-table-cell projects-table-cell--indexing" />
+                                  <td class="projects-table-cell projects-table-cell--incidents" />
+                                  <td class="projects-table-cell projects-table-cell--last-activity" />
+                                  <td class="projects-table-cell projects-table-cell--created" />
+                                  <td class="projects-table-cell projects-table-cell--activity" />
+                                  <td class="projects-table-cell projects-table-cell--actions" />
+                                </tr>
+                              )}
+                            </For>
+                          </tbody>
+                        </table>
                       </div>
                     </div>
                   }
@@ -2209,28 +2243,58 @@ function ProjectsHomeSkeleton(props: { viewMode: ProjectsView }) {
         fallback={
           <div class="projects-table-frame is-skeleton">
             <div class="projects-table-wrap is-skeleton">
-              <div class="projects-table">
-                <div class="projects-table-header is-skeleton" role="row">
-                <div class="projects-table-header-label projects-table-header-label--index">#</div>
-                <div class="projects-table-header-label">Name</div>
-                <div class="projects-table-header-label">Health</div>
-                <div class="projects-table-header-label">Indexing</div>
-                <div class="projects-table-header-label">Incidents</div>
-                <div class="projects-table-header-label">Last activity</div>
-                <div class="projects-table-header-label">Created at</div>
-                <div class="projects-table-header-label">Activity</div>
-                <div class="projects-table-header-spacer" aria-hidden="true" />
-              </div>
-
-                <div class="projects-collection is-table is-skeleton">
-                <For each={skeletonRows}>
-                  {() => (
-                    <article class="project-card is-table-row is-skeleton">
-                      <div class="project-card-main">
-                        <div class="project-card-cell project-card-cell--index">
+              <table class="projects-table">
+                <colgroup>
+                  <col class="projects-table-col projects-table-col--index" />
+                  <col class="projects-table-col projects-table-col--name" />
+                  <col class="projects-table-col projects-table-col--health" />
+                  <col class="projects-table-col projects-table-col--indexing" />
+                  <col class="projects-table-col projects-table-col--incidents" />
+                  <col class="projects-table-col projects-table-col--last-activity" />
+                  <col class="projects-table-col projects-table-col--created" />
+                  <col class="projects-table-col projects-table-col--activity" />
+                  <col class="projects-table-col projects-table-col--actions" />
+                </colgroup>
+                <thead>
+                  <tr class="projects-table-header is-skeleton">
+                    <th
+                      class="projects-table-header-label projects-table-header-label--index"
+                      scope="col"
+                    >
+                      #
+                    </th>
+                    <th class="projects-table-header-label" scope="col">
+                      Name
+                    </th>
+                    <th class="projects-table-header-label" scope="col">
+                      Health
+                    </th>
+                    <th class="projects-table-header-label" scope="col">
+                      Indexing
+                    </th>
+                    <th class="projects-table-header-label" scope="col">
+                      Incidents
+                    </th>
+                    <th class="projects-table-header-label" scope="col">
+                      Last activity
+                    </th>
+                    <th class="projects-table-header-label" scope="col">
+                      Created at
+                    </th>
+                    <th class="projects-table-header-label" scope="col">
+                      Activity
+                    </th>
+                    <th class="projects-table-header-spacer" scope="col" aria-hidden="true" />
+                  </tr>
+                </thead>
+                <tbody class="projects-table-body is-skeleton">
+                  <For each={skeletonRows}>
+                    {() => (
+                      <tr class="projects-table-row is-skeleton" aria-hidden="true">
+                        <td class="projects-table-cell projects-table-cell--index">
                           <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--tiny" />
-                        </div>
-                        <div class="project-card-cell project-card-cell--name">
+                        </td>
+                        <td class="projects-table-cell projects-table-cell--name">
                           <div class="project-card-title-row">
                             <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--name" />
                             <div class="projects-skeleton-inline-icons">
@@ -2238,34 +2302,33 @@ function ProjectsHomeSkeleton(props: { viewMode: ProjectsView }) {
                               <span class="projects-skeleton-icon" />
                             </div>
                           </div>
-                        </div>
-                        <div class="project-card-cell project-card-cell--health">
+                        </td>
+                        <td class="projects-table-cell projects-table-cell--health">
                           <div class="projects-skeleton-pill" />
-                        </div>
-                        <div class="project-card-cell project-card-cell--indexing">
+                        </td>
+                        <td class="projects-table-cell projects-table-cell--indexing">
                           <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--medium" />
-                        </div>
-                        <div class="project-card-cell project-card-cell--incidents">
+                        </td>
+                        <td class="projects-table-cell projects-table-cell--incidents">
                           <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--tiny" />
-                        </div>
-                        <div class="project-card-cell project-card-cell--last-activity">
+                        </td>
+                        <td class="projects-table-cell projects-table-cell--last-activity">
                           <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--medium" />
-                        </div>
-                        <div class="project-card-cell project-card-cell--created">
+                        </td>
+                        <td class="projects-table-cell projects-table-cell--created">
                           <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--medium" />
-                        </div>
-                        <div class="project-card-cell project-card-cell--activity">
+                        </td>
+                        <td class="projects-table-cell projects-table-cell--activity">
                           <div class="projects-skeleton-sparkline projects-skeleton-sparkline--inline" />
-                        </div>
-                      </div>
-                      <div class="project-card-menu">
-                        <div class="projects-skeleton-menu" />
-                      </div>
-                    </article>
-                  )}
-                </For>
-                </div>
-              </div>
+                        </td>
+                        <td class="projects-table-cell projects-table-cell--actions">
+                          <div class="projects-skeleton-menu" />
+                        </td>
+                      </tr>
+                    )}
+                  </For>
+                </tbody>
+              </table>
             </div>
           </div>
         }
