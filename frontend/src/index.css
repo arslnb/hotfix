@@ -200,7 +200,7 @@ button {
   flex-basis: 4rem;
   width: 4rem;
   min-width: 4rem;
-  padding: 0.45rem 0.55rem 0.9rem;
+  padding: calc(0.45rem + 3px) 0.55rem 0.9rem;
 }
 
 .app-sidebar-brand {
