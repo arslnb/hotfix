@@ -708,11 +708,13 @@ function AuthenticatedPanel(props: {
   return (
     <section class="logged-in-shell flex w-full flex-1">
       <aside class="app-sidebar" classList={{ "is-collapsed": forceSidebarCollapsed() }}>
-        <a href="/" class="app-sidebar-brand" aria-label="Go to dashboard">
-          <BrandWordmark mode="hover" />
-        </a>
+        <Show when={!forceSidebarCollapsed()}>
+          <a href="/" class="app-sidebar-brand" aria-label="Go to dashboard">
+            <BrandWordmark mode="hover" />
+          </a>
 
-        <div class="app-sidebar-gap" aria-hidden="true" />
+          <div class="app-sidebar-gap" aria-hidden="true" />
+        </Show>
 
         <nav class="app-sidebar-nav" aria-label="Primary">
           <For each={sidebarTabs()}>
