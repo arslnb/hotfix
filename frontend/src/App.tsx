@@ -18,6 +18,7 @@ const sidebarIncidentsIcon = new URL("./assets/sidebar/icons8-insect-50.svg", im
 const sidebarPerformanceIcon = new URL("./assets/sidebar/icons8-speed-50.svg", import.meta.url).href;
 const sidebarSettingsIcon = new URL("./assets/sidebar/icons8-settings-50.svg", import.meta.url).href;
 const brandText = "Hotfix";
+const matrixGlyphs = "HOTFIX01<>/*{}[]()+-=|:;#%$&ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const glyphVariants: Record<string, string[]> = {
   H: ["H", "#", "4"],
   o: ["o", "0", "O", "@"],
@@ -1378,6 +1379,10 @@ function ProjectsTab(props: {
 
   return (
     <div class="projects-shell">
+      <Show when={!openedProject()}>
+        <ProjectsMatrixBackdrop />
+      </Show>
+
       <Show
         when={!dashboard.error}
         fallback={
@@ -1417,183 +1422,253 @@ function ProjectsTab(props: {
             )}
           </Show>
           <Show when={!openedProject()}>
-            <div class="projects-header">
-              <div class="projects-header-copy">
-                <h1 class="projects-title">Projects</h1>
-              </div>
+            <div class="projects-home-surface">
+              <div class="projects-header">
+                <div class="projects-header-copy">
+                  <h1 class="projects-title">Projects</h1>
+                </div>
 
-              <div class="projects-header-actions">
-                <button class="brand-button" type="button" onClick={openCreateModal} disabled={dashboard.loading}>
-                  <span class="brand-button-plus" aria-hidden="true">
-                    +
-                  </span>
-                  <span>New project</span>
-                  <span class="brand-button-shortcut" aria-hidden="true">
-                    N
-                  </span>
-                </button>
-
-                <div class="projects-account-menu" data-projects-account-menu>
-                  <button
-                    class="projects-account-trigger"
-                    type="button"
-                    aria-haspopup="menu"
-                    aria-expanded={accountMenuOpen()}
-                    onClick={() => setAccountMenuOpen((open) => !open)}
-                  >
-                    <UserAvatar user={props.user} />
+                <div class="projects-header-actions">
+                  <button class="brand-button" type="button" onClick={openCreateModal} disabled={dashboard.loading}>
+                    <span class="brand-button-plus" aria-hidden="true">
+                      +
+                    </span>
+                    <span>New project</span>
+                    <span class="brand-button-shortcut" aria-hidden="true">
+                      N
+                    </span>
                   </button>
 
-                  <Show when={accountMenuOpen()}>
-                    <div class="projects-account-popover" role="menu">
-                      <div class="projects-account-popover-copy">
-                        <p class="projects-account-popover-name">{props.user.displayName}</p>
-                        <p class="projects-account-popover-email">
-                          {props.user.email ?? "Signed in"}
-                        </p>
+                  <div class="projects-account-menu" data-projects-account-menu>
+                    <button
+                      class="projects-account-trigger"
+                      type="button"
+                      aria-haspopup="menu"
+                      aria-expanded={accountMenuOpen()}
+                      onClick={() => setAccountMenuOpen((open) => !open)}
+                    >
+                      <UserAvatar user={props.user} />
+                    </button>
+
+                    <Show when={accountMenuOpen()}>
+                      <div class="projects-account-popover" role="menu">
+                        <div class="projects-account-popover-copy">
+                          <p class="projects-account-popover-name">{props.user.displayName}</p>
+                          <p class="projects-account-popover-email">
+                            {props.user.email ?? "Signed in"}
+                          </p>
+                        </div>
+                        <button
+                          class="projects-account-popover-item"
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setAccountMenuOpen(false);
+                            setSettingsModalOpen(true);
+                          }}
+                        >
+                          Settings
+                        </button>
+                        <button
+                          class="projects-account-popover-item"
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setAccountMenuOpen(false);
+                            void props.onLogout();
+                          }}
+                          disabled={props.loggingOut}
+                        >
+                          {props.loggingOut ? "Logging out..." : "Log out"}
+                        </button>
                       </div>
-                      <button
-                        class="projects-account-popover-item"
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          setAccountMenuOpen(false);
-                          setSettingsModalOpen(true);
-                        }}
-                      >
-                        Settings
-                      </button>
-                      <button
-                        class="projects-account-popover-item"
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          setAccountMenuOpen(false);
-                          void props.onLogout();
-                        }}
-                        disabled={props.loggingOut}
-                      >
-                        {props.loggingOut ? "Logging out..." : "Log out"}
-                      </button>
-                    </div>
-                  </Show>
+                    </Show>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div class="projects-toolbar">
-              <div class="projects-toolbar-meta">
-                <span class="projects-toolbar-icon" aria-hidden="true">
-                  <svg viewBox="0 0 16 16" fill="none">
-                    <path
-                      d="M3 3.25h3v3H3v-3Zm7 0h3v3h-3v-3ZM3 9.75h3v3H3v-3Zm7 0h3v3h-3v-3Z"
-                      stroke="currentColor"
-                      stroke-width="1.1"
-                    />
-                  </svg>
-                </span>
-                <span>{sortedProjects().length} Projects</span>
-                <span class="projects-toolbar-divider" aria-hidden="true" />
-                <label class="projects-sort-label" for="projects-sort">
-                  Sort by:
-                </label>
-                <div class="projects-select-wrap">
-                  <select
-                    id="projects-sort"
-                    class="projects-select"
-                    value={sortBy()}
-                    onInput={(event) => setSortBy(event.currentTarget.value as ProjectsSort)}
-                  >
-                    <option value="created">Date Created</option>
-                    <option value="alphabetical">Alphabetical</option>
-                  </select>
-                  <span class="projects-select-caret" aria-hidden="true">
+              <div class="projects-toolbar">
+                <div class="projects-toolbar-meta">
+                  <span class="projects-toolbar-icon" aria-hidden="true">
                     <svg viewBox="0 0 16 16" fill="none">
-                      <path d="m4.25 6.25 3.75 3.75 3.75-3.75" stroke="currentColor" stroke-width="1.15" />
+                      <path
+                        d="M3 3.25h3v3H3v-3Zm7 0h3v3h-3v-3ZM3 9.75h3v3H3v-3Zm7 0h3v3h-3v-3Z"
+                        stroke="currentColor"
+                        stroke-width="1.1"
+                      />
                     </svg>
                   </span>
-                </div>
-              </div>
-
-              <div class="projects-view-toggle" role="tablist" aria-label="Project layout">
-                <button
-                  class="projects-view-button"
-                  classList={{ "is-active": viewMode() === "grid" }}
-                  type="button"
-                  role="tab"
-                  aria-selected={viewMode() === "grid"}
-                  title="Grid view"
-                  onClick={() => setViewMode("grid")}
-                >
-                  <ViewModeIcon mode="grid" />
-                </button>
-                <button
-                  class="projects-view-button"
-                  classList={{ "is-active": viewMode() === "list" }}
-                  type="button"
-                  role="tab"
-                  aria-selected={viewMode() === "list"}
-                  title="List view"
-                  onClick={() => setViewMode("list")}
-                >
-                  <ViewModeIcon mode="list" />
-                </button>
-              </div>
-            </div>
-
-            <Show
-              when={sortedProjects().length > 0}
-              fallback={
-                <div class="projects-empty-state">
-                  <div class="projects-empty-illustration" aria-hidden="true">
-                    <svg viewBox="0 0 80 80" fill="none">
-                      <rect x="18" y="16" width="44" height="48" rx="4" fill="rgba(255,255,255,0.03)" />
-                      <path
-                        d="M29 27h22M29 35h16"
-                        stroke="rgba(242,238,227,0.34)"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                      />
-                      <path
-                        d="M26 52.5c4.2-5.2 8.9-7.8 14.2-7.8 5.4 0 9.9 2.6 13.8 7.8"
-                        stroke="url(#empty-graph-stroke)"
-                        stroke-width="3"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      />
-                      <circle cx="40.5" cy="22" r="12.5" fill="rgba(127,220,255,0.08)" />
-                      <path
-                        d="M35 22.2h4.2l2.8-4.7 3.6 9.1 2.4-4.4H52"
-                        stroke="url(#empty-graph-stroke)"
-                        stroke-width="2.4"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      />
-                      <defs>
-                        <linearGradient id="empty-graph-stroke" x1="24" y1="54" x2="55" y2="18" gradientUnits="userSpaceOnUse">
-                          <stop stop-color="rgba(70,136,220,0.78)" />
-                          <stop offset="0.56" stop-color="rgba(127,220,255,0.9)" />
-                          <stop offset="1" stop-color="#a4f0ff" />
-                        </linearGradient>
-                      </defs>
-                    </svg>
+                  <span>{sortedProjects().length} Projects</span>
+                  <span class="projects-toolbar-divider" aria-hidden="true" />
+                  <label class="projects-sort-label" for="projects-sort">
+                    Sort by:
+                  </label>
+                  <div class="projects-select-wrap">
+                    <select
+                      id="projects-sort"
+                      class="projects-select"
+                      value={sortBy()}
+                      onInput={(event) => setSortBy(event.currentTarget.value as ProjectsSort)}
+                    >
+                      <option value="created">Date Created</option>
+                      <option value="alphabetical">Alphabetical</option>
+                    </select>
+                    <span class="projects-select-caret" aria-hidden="true">
+                      <svg viewBox="0 0 16 16" fill="none">
+                        <path d="m4.25 6.25 3.75 3.75 3.75-3.75" stroke="currentColor" stroke-width="1.15" />
+                      </svg>
+                    </span>
                   </div>
-                  <p class="projects-empty-title">No projects yet</p>
-                  <p class="projects-empty-copy">
-                    Create a blank project, then add repo-backed items to the canvas and optionally
-                    attach specific Sentry projects later.
-                  </p>
                 </div>
-              }
-            >
+
+                <div class="projects-view-toggle" role="tablist" aria-label="Project layout">
+                  <button
+                    class="projects-view-button"
+                    classList={{ "is-active": viewMode() === "grid" }}
+                    type="button"
+                    role="tab"
+                    aria-selected={viewMode() === "grid"}
+                    title="Grid view"
+                    onClick={() => setViewMode("grid")}
+                  >
+                    <ViewModeIcon mode="grid" />
+                  </button>
+                  <button
+                    class="projects-view-button"
+                    classList={{ "is-active": viewMode() === "list" }}
+                    type="button"
+                    role="tab"
+                    aria-selected={viewMode() === "list"}
+                    title="List view"
+                    onClick={() => setViewMode("list")}
+                  >
+                    <ViewModeIcon mode="list" />
+                  </button>
+                </div>
+              </div>
+
               <Show
-                when={viewMode() === "grid"}
+                when={sortedProjects().length > 0}
                 fallback={
-                  <div class="projects-collection">
+                  <div class="projects-empty-state">
+                    <div class="projects-empty-illustration" aria-hidden="true">
+                      <svg viewBox="0 0 80 80" fill="none">
+                        <rect x="18" y="16" width="44" height="48" rx="4" fill="rgba(255,255,255,0.03)" />
+                        <path
+                          d="M29 27h22M29 35h16"
+                          stroke="rgba(242,238,227,0.34)"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                        />
+                        <path
+                          d="M26 52.5c4.2-5.2 8.9-7.8 14.2-7.8 5.4 0 9.9 2.6 13.8 7.8"
+                          stroke="url(#empty-graph-stroke)"
+                          stroke-width="3"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
+                        <circle cx="40.5" cy="22" r="12.5" fill="rgba(127,220,255,0.08)" />
+                        <path
+                          d="M35 22.2h4.2l2.8-4.7 3.6 9.1 2.4-4.4H52"
+                          stroke="url(#empty-graph-stroke)"
+                          stroke-width="2.4"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
+                        <defs>
+                          <linearGradient id="empty-graph-stroke" x1="24" y1="54" x2="55" y2="18" gradientUnits="userSpaceOnUse">
+                            <stop stop-color="rgba(70,136,220,0.78)" />
+                            <stop offset="0.56" stop-color="rgba(127,220,255,0.9)" />
+                            <stop offset="1" stop-color="#a4f0ff" />
+                          </linearGradient>
+                        </defs>
+                      </svg>
+                    </div>
+                    <p class="projects-empty-title">No projects yet</p>
+                    <p class="projects-empty-copy">
+                      Create a blank project, then add repo-backed items to the canvas and optionally
+                      attach specific Sentry projects later.
+                    </p>
+                  </div>
+                }
+              >
+                <Show
+                  when={viewMode() === "grid"}
+                  fallback={
+                    <div class="projects-collection">
+                      <For each={sortedProjects()}>
+                        {(project) => (
+                          <article
+                            class="project-card"
+                            classList={{
+                              "is-selected": selectedProjectId() === project.id,
+                            }}
+                            aria-selected={selectedProjectId() === project.id}
+                            onMouseEnter={() => setSelectedProjectId(project.id)}
+                          >
+                            <button
+                              class="project-card-main"
+                              type="button"
+                              onFocus={() => setSelectedProjectId(project.id)}
+                              onClick={() => openProject(project.id)}
+                            >
+                              <div class="project-card-copy">
+                                <h2 class="project-card-title">{project.name}</h2>
+                                <p class="project-card-meta">{formatProjectDate(project.createdAt)}</p>
+                              </div>
+
+                              <div class="project-card-stats is-inline">
+                                <ProjectSparkline seed={`${project.id}:${project.name}`} compact={true} />
+                              </div>
+                            </button>
+
+                            <div class="project-card-menu" data-project-action-menu>
+                              <button
+                                class="project-card-menu-trigger"
+                                type="button"
+                                aria-haspopup="menu"
+                                aria-expanded={projectMenuOpenId() === project.id}
+                                onClick={() =>
+                                  setProjectMenuOpenId((current) => (current === project.id ? null : project.id))
+                                }
+                              >
+                                <span />
+                                <span />
+                                <span />
+                              </button>
+
+                              <Show when={projectMenuOpenId() === project.id}>
+                                <div class="project-card-popover" role="menu">
+                                  <button
+                                    class="project-card-popover-item"
+                                    type="button"
+                                    role="menuitem"
+                                    onClick={() => openRenameModal(project)}
+                                  >
+                                    Rename
+                                  </button>
+                                  <button
+                                    class="project-card-popover-item is-danger"
+                                    type="button"
+                                    role="menuitem"
+                                    onClick={() => openDeleteModal(project)}
+                                  >
+                                    Delete project
+                                  </button>
+                                </div>
+                              </Show>
+                            </div>
+                          </article>
+                        )}
+                      </For>
+                    </div>
+                  }
+                >
+                  <div class="projects-collection is-grid">
                     <For each={sortedProjects()}>
                       {(project) => (
                         <article
-                          class="project-card"
+                          class="project-card is-grid"
                           classList={{
                             "is-selected": selectedProjectId() === project.id,
                           }}
@@ -1611,8 +1686,8 @@ function ProjectsTab(props: {
                               <p class="project-card-meta">{formatProjectDate(project.createdAt)}</p>
                             </div>
 
-                            <div class="project-card-stats is-inline">
-                              <ProjectSparkline seed={`${project.id}:${project.name}`} compact={true} />
+                            <div class="project-card-stats">
+                              <ProjectSparkline seed={`${project.id}:${project.name}`} compact={false} />
                             </div>
                           </button>
 
@@ -1656,77 +1731,9 @@ function ProjectsTab(props: {
                       )}
                     </For>
                   </div>
-                }
-              >
-                <div class="projects-collection is-grid">
-                  <For each={sortedProjects()}>
-                    {(project) => (
-                      <article
-                        class="project-card is-grid"
-                        classList={{
-                          "is-selected": selectedProjectId() === project.id,
-                        }}
-                        aria-selected={selectedProjectId() === project.id}
-                        onMouseEnter={() => setSelectedProjectId(project.id)}
-                      >
-                        <button
-                          class="project-card-main"
-                          type="button"
-                          onFocus={() => setSelectedProjectId(project.id)}
-                          onClick={() => openProject(project.id)}
-                        >
-                          <div class="project-card-copy">
-                            <h2 class="project-card-title">{project.name}</h2>
-                            <p class="project-card-meta">{formatProjectDate(project.createdAt)}</p>
-                          </div>
-
-                          <div class="project-card-stats">
-                            <ProjectSparkline seed={`${project.id}:${project.name}`} compact={false} />
-                          </div>
-                        </button>
-
-                        <div class="project-card-menu" data-project-action-menu>
-                          <button
-                            class="project-card-menu-trigger"
-                            type="button"
-                            aria-haspopup="menu"
-                            aria-expanded={projectMenuOpenId() === project.id}
-                            onClick={() =>
-                              setProjectMenuOpenId((current) => (current === project.id ? null : project.id))
-                            }
-                          >
-                            <span />
-                            <span />
-                            <span />
-                          </button>
-
-                          <Show when={projectMenuOpenId() === project.id}>
-                            <div class="project-card-popover" role="menu">
-                              <button
-                                class="project-card-popover-item"
-                                type="button"
-                                role="menuitem"
-                                onClick={() => openRenameModal(project)}
-                              >
-                                Rename
-                              </button>
-                              <button
-                                class="project-card-popover-item is-danger"
-                                type="button"
-                                role="menuitem"
-                                onClick={() => openDeleteModal(project)}
-                              >
-                                Delete project
-                              </button>
-                            </div>
-                          </Show>
-                        </div>
-                      </article>
-                    )}
-                  </For>
-                </div>
+                </Show>
               </Show>
-            </Show>
+            </div>
           </Show>
         </Show>
       </Show>
@@ -2738,6 +2745,55 @@ function ViewModeIcon(props: { mode: ProjectsView }) {
         </svg>
       </Show>
     </span>
+  );
+}
+
+function ProjectsMatrixBackdrop() {
+  const columns = Array.from({ length: 24 }, (_, index) => {
+    const glyphCount = 22 + (index % 7);
+    const characters = Array.from({ length: glyphCount }, (_, characterIndex) => ({
+      value: matrixGlyphs[Math.floor(Math.random() * matrixGlyphs.length)] ?? "H",
+      bright: characterIndex % 7 === 0,
+    }));
+
+    return {
+      key: `matrix-column-${index}`,
+      left: `${(index / 23) * 100}%`,
+      duration: `${7.5 + (index % 5) * 1.1}s`,
+      delay: `${-1 * ((index % 6) * 0.85)}s`,
+      opacity: (0.12 + (index % 4) * 0.03).toFixed(2),
+      fontSize: `${11 + (index % 3)}px`,
+      characters,
+    };
+  });
+
+  return (
+    <div class="projects-matrix-bg" aria-hidden="true">
+      <For each={columns}>
+        {(column) => (
+          <div
+            class="projects-matrix-column"
+            style={{
+              left: column.left,
+              "animation-duration": column.duration,
+              "animation-delay": column.delay,
+              opacity: column.opacity,
+              "font-size": column.fontSize,
+            }}
+          >
+            <div class="projects-matrix-track">
+              <For each={[...column.characters, ...column.characters]}>
+                {(character) => (
+                  <span class="projects-matrix-char" classList={{ "is-bright": character.bright }}>
+                    {character.value}
+                  </span>
+                )}
+              </For>
+            </div>
+          </div>
+        )}
+      </For>
+    </div>
   );
 }
 

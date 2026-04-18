@@ -759,9 +759,81 @@ button {
 }
 
 .projects-shell {
+  position: relative;
+  isolation: isolate;
   display: flex;
   flex-direction: column;
   gap: 1.6rem;
+}
+
+.projects-home-surface {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1.6rem;
+}
+
+.projects-matrix-bg {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 240px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+  mask-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.82) 0px,
+    rgba(0, 0, 0, 0.68) 110px,
+    rgba(0, 0, 0, 0) 210px
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.82) 0px,
+    rgba(0, 0, 0, 0.68) 110px,
+    rgba(0, 0, 0, 0) 210px
+  );
+}
+
+.projects-matrix-column {
+  position: absolute;
+  top: -120px;
+  transform: translateX(-50%);
+  animation-name: projects-matrix-fall;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  will-change: transform;
+}
+
+.projects-matrix-track {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.24rem;
+  color: rgba(127, 220, 255, 0.34);
+  font-family: "Geist Mono", ui-monospace, "SFMono-Regular", "SF Mono", monospace;
+  font-weight: 500;
+  line-height: 1;
+  text-shadow: 0 0 10px rgba(127, 220, 255, 0.08);
+}
+
+.projects-matrix-char {
+  display: block;
+}
+
+.projects-matrix-char.is-bright {
+  color: rgba(164, 240, 255, 0.72);
+  text-shadow: 0 0 12px rgba(127, 220, 255, 0.22);
+}
+
+@keyframes projects-matrix-fall {
+  from {
+    transform: translateX(-50%) translateY(-46%);
+  }
+
+  to {
+    transform: translateX(-50%) translateY(0);
+  }
 }
 
 .projects-header {
