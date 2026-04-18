@@ -655,20 +655,24 @@ button {
   width: 32px;
   height: 32px;
   padding: 0;
-  border: none;
+  border: 1px solid rgba(127, 220, 255, 0.24);
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--text-primary);
+  background: rgba(7, 9, 10, 0.92);
+  color: rgba(164, 240, 255, 0.92);
   cursor: pointer;
   overflow: hidden;
   transition:
     background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease,
     transform 110ms ease;
 }
 
 .projects-account-trigger:hover,
 .projects-account-trigger:focus-visible {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(11, 15, 18, 0.98);
+  border-color: rgba(127, 220, 255, 0.56);
+  color: rgba(197, 245, 255, 0.96);
   outline: none;
 }
 
