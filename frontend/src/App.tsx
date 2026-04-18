@@ -18,39 +18,6 @@ const sidebarIncidentsIcon = new URL("./assets/sidebar/icons8-insect-50.svg", im
 const sidebarPerformanceIcon = new URL("./assets/sidebar/icons8-speed-50.svg", import.meta.url).href;
 const sidebarSettingsIcon = new URL("./assets/sidebar/icons8-settings-50.svg", import.meta.url).href;
 const brandText = "Hotfix";
-const matrixCodeTokens = [
-  "const",
-  "async",
-  "await",
-  "return",
-  "fetch",
-  "project",
-  "repo",
-  "sentry",
-  "github",
-  "incident",
-  "trace",
-  "error",
-  "index",
-  "graph",
-  "cache",
-  "queue",
-  "worker",
-  "select",
-  "from",
-  "where",
-  "join",
-  "props",
-  "state",
-  "null",
-  "true",
-  "false",
-  "build",
-  "deploy",
-  "slug",
-  "hotfix",
-];
-const matrixAsciiNoise = ["{", "}", "[", "]", "(", ")", "<", ">", "/", "\\", "=", "+", "-", "*", "&", "|", ";", ":", "_", ".", ",", "?", "!", "#", "$", "%", "~"];
 const glyphVariants: Record<string, string[]> = {
   H: ["H", "#", "4"],
   o: ["o", "0", "O", "@"],
@@ -1412,7 +1379,7 @@ function ProjectsTab(props: {
   return (
     <div class="projects-shell">
       <Show when={!openedProject()}>
-        <ProjectsMatrixBackdrop />
+        <div class="projects-top-border" aria-hidden="true" />
       </Show>
 
       <Show
@@ -2787,77 +2754,6 @@ function ViewModeIcon(props: { mode: ProjectsView }) {
         </svg>
       </Show>
     </span>
-  );
-}
-
-function ProjectsMatrixBackdrop() {
-  const accentTones = ["green", "amber", "violet"] as const;
-  const columnCount = 248;
-  const columns = Array.from({ length: columnCount }, (_, index) => {
-    const glyphCount = 22 + (index % 7);
-    const snippetCount = 5 + (index % 4);
-    const source = Array.from({ length: snippetCount }, (_, snippetIndex) => {
-      const head = matrixCodeTokens[(index * 5 + snippetIndex * 3) % matrixCodeTokens.length] ?? "const";
-      const operator = matrixAsciiNoise[(index * 7 + snippetIndex * 5) % matrixAsciiNoise.length] ?? "=";
-      const tail = matrixCodeTokens[(index * 11 + snippetIndex * 7 + 3) % matrixCodeTokens.length] ?? "state";
-      const suffix = matrixAsciiNoise[(index * 13 + snippetIndex * 2 + 1) % matrixAsciiNoise.length] ?? ";";
-      return `${head}${operator}${tail}${suffix}`;
-    }).join("");
-    const stream = Array.from({ length: glyphCount * 2 }, (_, characterIndex) => {
-      const noiseRoll = Math.random();
-      const sourceIndex = (characterIndex * 3 + index * 5) % source.length;
-      const value =
-        noiseRoll > 0.92
-          ? matrixAsciiNoise[Math.floor(Math.random() * matrixAsciiNoise.length)] ?? ";"
-          : source[sourceIndex] ?? "c";
-      return characterIndex % 11 === 0 ? value.toUpperCase() : value;
-    }).join("\n");
-    const accent = accentTones[index % accentTones.length] ?? "green";
-    const gradient =
-      accent === "green"
-        ? "linear-gradient(180deg, rgba(205,255,240,0.95) 0%, rgba(130,255,184,0.9) 18%, rgba(127,220,255,0.5) 42%, rgba(127,220,255,0.16) 100%)"
-        : accent === "amber"
-          ? "linear-gradient(180deg, rgba(255,245,214,0.95) 0%, rgba(255,214,124,0.88) 18%, rgba(127,220,255,0.46) 42%, rgba(127,220,255,0.14) 100%)"
-          : "linear-gradient(180deg, rgba(244,236,255,0.95) 0%, rgba(206,174,255,0.88) 18%, rgba(127,220,255,0.46) 42%, rgba(127,220,255,0.14) 100%)";
-
-    return {
-      key: `matrix-column-${index}`,
-      left: `${(index / (columnCount - 1)) * 100}%`,
-      duration: `${7.5 + (index % 5) * 1.1}s`,
-      delay: `${-1 * ((index % 6) * 0.85)}s`,
-      opacity: (0.12 + (index % 4) * 0.03).toFixed(2),
-      fontSize: `${8 + (index % 2)}px`,
-      gradient,
-      stream,
-    };
-  });
-
-  return (
-    <div class="projects-matrix-bg" aria-hidden="true">
-      <For each={columns}>
-        {(column) => (
-          <div
-            class="projects-matrix-column"
-            style={{
-              left: column.left,
-              "animation-duration": column.duration,
-              "animation-delay": column.delay,
-              opacity: column.opacity,
-              "font-size": column.fontSize,
-            }}
-          >
-            <span
-              class="projects-matrix-track"
-              style={{
-                "--matrix-gradient": column.gradient,
-              }}
-            >
-              {column.stream}
-            </span>
-          </div>
-        )}
-      </For>
-    </div>
   );
 }
 

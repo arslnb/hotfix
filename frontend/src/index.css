@@ -792,62 +792,18 @@ button {
   gap: 1.6rem;
 }
 
-.projects-matrix-bg {
+.projects-top-border {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
-  height: 240px;
-  width: 100vw;
-  overflow: hidden;
+  height: 3px;
+  background: linear-gradient(90deg, rgba(127, 220, 255, 0.88), rgba(164, 240, 255, 1) 52%, rgba(127, 220, 255, 0.88));
+  box-shadow:
+    0 0 0 1px rgba(127, 220, 255, 0.16),
+    0 0 14px rgba(127, 220, 255, 0.28);
   pointer-events: none;
-  z-index: 0;
-  mask-image: linear-gradient(
-    to bottom,
-    rgba(0, 0, 0, 0.82) 0px,
-    rgba(0, 0, 0, 0.68) 110px,
-    rgba(0, 0, 0, 0) 210px
-  );
-  -webkit-mask-image: linear-gradient(
-    to bottom,
-    rgba(0, 0, 0, 0.82) 0px,
-    rgba(0, 0, 0, 0.68) 110px,
-    rgba(0, 0, 0, 0) 210px
-  );
-}
-
-.projects-matrix-column {
-  position: absolute;
-  top: -120px;
-  transform: translateX(-50%);
-  animation-name: projects-matrix-fall;
-  animation-timing-function: linear;
-  animation-iteration-count: infinite;
-  will-change: transform;
-}
-
-.projects-matrix-track {
-  display: block;
-  white-space: pre;
-  font-family: "Geist Mono", ui-monospace, "SFMono-Regular", "SF Mono", monospace;
-  font-weight: 500;
-  line-height: 0.82;
-  background-image: var(--matrix-gradient);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  filter: drop-shadow(0 0 8px rgba(127, 220, 255, 0.12));
-  user-select: none;
-}
-
-@keyframes projects-matrix-fall {
-  from {
-    transform: translateX(-50%) translateY(-46%);
-  }
-
-  to {
-    transform: translateX(-50%) translateY(0);
-  }
+  z-index: 8;
 }
 
 .projects-header {
