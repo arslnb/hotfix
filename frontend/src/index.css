@@ -1255,17 +1255,38 @@ button {
 }
 
 .projects-collection.is-grid {
-  gap: 0.85rem;
-  width: 100%;
-  max-width: calc((14.5rem * 4) + 2.55rem);
-  grid-template-columns: repeat(auto-fit, minmax(14.5rem, 14.5rem));
-  justify-content: start;
+  display: none;
 }
 
-.projects-grid-frame,
+.projects-grid-frame {
+  padding-inline: var(--projects-home-inset);
+  padding-top: 0;
+}
+
 .projects-empty-frame {
   padding-inline: var(--projects-home-inset);
   padding-top: 1.6rem;
+}
+
+.projects-grid-lattice {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  width: 100%;
+}
+
+.projects-grid-slot {
+  position: relative;
+  min-width: 0;
+  min-height: 9.5rem;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  background: transparent;
+}
+
+.projects-grid-slot.is-filler {
+  pointer-events: none;
+  border-right-color: rgba(255, 255, 255, calc(0.07 * var(--filler-opacity, 1)));
+  border-bottom-color: rgba(255, 255, 255, calc(0.066 * var(--filler-opacity, 1)));
 }
 
 .project-card {
@@ -1299,11 +1320,14 @@ button {
 }
 
 .project-card.is-grid {
-  min-height: 7.85rem;
+  min-height: 100%;
+  height: 100%;
+  border: none;
+  border-radius: 0;
 }
 
 .project-card.is-grid:not(.is-selected) {
-  background: #0d0f11;
+  background: transparent;
   filter: grayscale(1) saturate(0.12) brightness(0.92);
 }
 
@@ -1328,9 +1352,9 @@ button {
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
-  min-height: 7.85rem;
+  min-height: 100%;
   gap: 0.45rem;
-  padding: 0;
+  padding: 0.9rem 0.95rem 0.8rem;
 }
 
 .project-card:not(.is-grid) .project-card-main {

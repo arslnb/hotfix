@@ -773,7 +773,9 @@ function ProjectsTab(props: {
     async () => fetchDashboard(),
   );
   const [tableFillerRows, setTableFillerRows] = createSignal(0);
+  const [gridFillerCells, setGridFillerCells] = createSignal(0);
   let tableWrapRef: HTMLDivElement | undefined;
+  let gridFrameRef: HTMLDivElement | undefined;
 
   const sentryOrganizations = createMemo(() => dashboard()?.sentryOrganizations ?? []);
   const canCreateProject = createMemo(() => projectName().trim().length > 0 && !creating());
@@ -845,29 +847,59 @@ function ProjectsTab(props: {
 
     return projects;
   });
-  const updateTableFillerRows = () => {
+  const gridFillerItems = createMemo(() => {
+    const count = gridFillerCells();
+    const totalRows = Math.max(Math.ceil(count / 6), 1);
+
+    return Array.from({ length: count }, (_, index) => ({
+      index,
+      opacity: Math.max(0, 1 - Math.floor(index / 6) / Math.max(totalRows - 1, 1)),
+    }));
+  });
+  const updateViewportFill = () => {
     if (typeof window === "undefined") {
       return;
     }
 
-    if (viewMode() !== "list") {
-      setTableFillerRows(0);
+    if (viewMode() === "list") {
+      setGridFillerCells(0);
+      const tableWrap = tableWrapRef;
+      if (!tableWrap) {
+        setTableFillerRows(0);
+        return;
+      }
+
+      const rect = tableWrap.getBoundingClientRect();
+      const remainingHeight = Math.max(0, window.innerHeight - rect.top - 40);
+      const rowHeight = 32;
+      const headerHeight = 26;
+      const visibleRows = Math.max(0, Math.floor((remainingHeight - headerHeight) / rowHeight));
+      const fillerCount = Math.max(0, visibleRows - sortedProjects().length - 3);
+      setTableFillerRows(Math.min(fillerCount, 24));
       return;
     }
 
-    const tableWrap = tableWrapRef;
-    if (!tableWrap) {
+    if (viewMode() === "grid") {
       setTableFillerRows(0);
+      const gridFrame = gridFrameRef;
+      if (!gridFrame) {
+        setGridFillerCells(0);
+        return;
+      }
+
+      const rect = gridFrame.getBoundingClientRect();
+      const remainingHeight = Math.max(0, window.innerHeight - rect.top - 32);
+      const columns = 6;
+      const rowHeight = 152;
+      const visibleRows = Math.max(1, Math.ceil(remainingHeight / rowHeight));
+      const visibleCells = visibleRows * columns;
+      const fillerCount = Math.max(0, visibleCells - sortedProjects().length);
+      setGridFillerCells(Math.min(fillerCount, 72));
       return;
     }
 
-    const rect = tableWrap.getBoundingClientRect();
-    const remainingHeight = Math.max(0, window.innerHeight - rect.top - 40);
-    const rowHeight = 32;
-    const headerHeight = 26;
-    const visibleRows = Math.max(0, Math.floor((remainingHeight - headerHeight) / rowHeight));
-    const fillerCount = Math.max(0, visibleRows - sortedProjects().length - 3);
-    setTableFillerRows(Math.min(fillerCount, 24));
+    setTableFillerRows(0);
+    setGridFillerCells(0);
   };
   const selectedProject = createMemo(
     () => sortedProjects().find((project) => project.id === selectedProjectId()) ?? null,
@@ -1026,7 +1058,7 @@ function ProjectsTab(props: {
   createEffect(() => {
     sortedProjects();
     viewMode();
-    queueMicrotask(updateTableFillerRows);
+    queueMicrotask(updateViewportFill);
   });
 
   createEffect(() => {
@@ -1162,14 +1194,14 @@ function ProjectsTab(props: {
     };
 
     const handleResize = () => {
-      updateTableFillerRows();
+      updateViewportFill();
     };
 
     window.addEventListener("mousedown", handlePointerDown);
     window.addEventListener("popstate", handlePopState);
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("resize", handleResize);
-    updateTableFillerRows();
+    updateViewportFill();
     onCleanup(() => {
       window.removeEventListener("mousedown", handlePointerDown);
       window.removeEventListener("popstate", handlePopState);
@@ -1960,80 +1992,93 @@ function ProjectsTab(props: {
                     </div>
                   }
                 >
-                  <div class="projects-grid-frame">
-                    <div class="projects-collection is-grid">
-                    <For each={sortedProjects()}>
-                      {(project) => (
-                        <article
-                          class="project-card is-grid"
-                          classList={{
-                            "is-selected": selectedProjectId() === project.id,
-                          }}
-                          aria-selected={selectedProjectId() === project.id}
-                          onMouseEnter={() => setSelectedProjectId(project.id)}
-                        >
-                          <button
-                            class="project-card-main"
-                            type="button"
-                            onFocus={() => setSelectedProjectId(project.id)}
-                            onClick={() => openProject(project.id)}
-                          >
-                            <div class="project-card-copy">
-                              <h2 class="project-card-title">{project.name}</h2>
-                              <p class="project-card-meta">
-                                {formatProjectDate(project.createdAt)}
-                              </p>
-                            </div>
-
-                            <div class="project-card-stats">
-                              <ProjectSparkline
-                                seed={`${project.id}:${project.name}`}
-                                compact={false}
-                              />
-                            </div>
-                          </button>
-
-                          <div class="project-card-menu" data-project-action-menu>
-                            <button
-                              class="project-card-menu-trigger"
-                              type="button"
-                              aria-haspopup="menu"
-                              aria-expanded={projectMenuOpenId() === project.id}
-                              onClick={() =>
-                                setProjectMenuOpenId((current) =>
-                                  current === project.id ? null : project.id,
-                                )
-                              }
+                  <div class="projects-grid-frame" ref={gridFrameRef}>
+                    <div class="projects-grid-lattice">
+                      <For each={sortedProjects()}>
+                        {(project) => (
+                          <div class="projects-grid-slot">
+                            <article
+                              class="project-card is-grid"
+                              classList={{
+                                "is-selected": selectedProjectId() === project.id,
+                              }}
+                              aria-selected={selectedProjectId() === project.id}
+                              onMouseEnter={() => setSelectedProjectId(project.id)}
                             >
-                              <span />
-                              <span />
-                              <span />
-                            </button>
+                              <button
+                                class="project-card-main"
+                                type="button"
+                                onFocus={() => setSelectedProjectId(project.id)}
+                                onClick={() => openProject(project.id)}
+                              >
+                                <div class="project-card-copy">
+                                  <h2 class="project-card-title">{project.name}</h2>
+                                  <p class="project-card-meta">
+                                    {formatProjectDate(project.createdAt)}
+                                  </p>
+                                </div>
 
-                            <Show when={projectMenuOpenId() === project.id}>
-                              <div class="project-card-popover" role="menu">
+                                <div class="project-card-stats">
+                                  <ProjectSparkline
+                                    seed={`${project.id}:${project.name}`}
+                                    compact={false}
+                                  />
+                                </div>
+                              </button>
+
+                              <div class="project-card-menu" data-project-action-menu>
                                 <button
-                                  class="project-card-popover-item"
+                                  class="project-card-menu-trigger"
                                   type="button"
-                                  role="menuitem"
-                                  onClick={() => openRenameModal(project)}
+                                  aria-haspopup="menu"
+                                  aria-expanded={projectMenuOpenId() === project.id}
+                                  onClick={() =>
+                                    setProjectMenuOpenId((current) =>
+                                      current === project.id ? null : project.id,
+                                    )
+                                  }
                                 >
-                                  Rename
+                                  <span />
+                                  <span />
+                                  <span />
                                 </button>
-                                <button
-                                  class="project-card-popover-item is-danger"
-                                  type="button"
-                                  role="menuitem"
-                                  onClick={() => openDeleteModal(project)}
-                                >
-                                  Delete project
-                                </button>
+
+                                <Show when={projectMenuOpenId() === project.id}>
+                                  <div class="project-card-popover" role="menu">
+                                    <button
+                                      class="project-card-popover-item"
+                                      type="button"
+                                      role="menuitem"
+                                      onClick={() => openRenameModal(project)}
+                                    >
+                                      Rename
+                                    </button>
+                                    <button
+                                      class="project-card-popover-item is-danger"
+                                      type="button"
+                                      role="menuitem"
+                                      onClick={() => openDeleteModal(project)}
+                                    >
+                                      Delete project
+                                    </button>
+                                  </div>
+                                </Show>
                               </div>
-                            </Show>
+                            </article>
                           </div>
-                        </article>
-                      )}
-                    </For>
+                        )}
+                      </For>
+                      <For each={gridFillerItems()}>
+                        {(item) => (
+                          <div
+                            class="projects-grid-slot is-filler"
+                            aria-hidden="true"
+                            style={{
+                              "--filler-opacity": `${item.opacity}`,
+                            }}
+                          />
+                        )}
+                      </For>
                     </div>
                   </div>
                 </Show>
@@ -2377,23 +2422,25 @@ function ProjectsHomeSkeleton(props: { viewMode: ProjectsView }) {
         }
       >
         <div class="projects-grid-frame is-skeleton">
-          <div class="projects-collection is-grid is-skeleton">
+          <div class="projects-grid-lattice is-skeleton">
           <For each={skeletonCards}>
             {() => (
-              <article class="project-card is-grid is-skeleton">
-                <div class="project-card-main">
-                  <div class="project-card-copy">
-                    <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--name" />
-                    <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--date" />
+              <div class="projects-grid-slot">
+                <article class="project-card is-grid is-skeleton">
+                  <div class="project-card-main">
+                    <div class="project-card-copy">
+                      <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--name" />
+                      <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--date" />
+                    </div>
+                    <div class="project-card-stats">
+                      <div class="projects-skeleton-sparkline" />
+                    </div>
                   </div>
-                  <div class="project-card-stats">
-                    <div class="projects-skeleton-sparkline" />
+                  <div class="project-card-menu">
+                    <div class="projects-skeleton-menu" />
                   </div>
-                </div>
-                <div class="project-card-menu">
-                  <div class="projects-skeleton-menu" />
-                </div>
-              </article>
+                </article>
+              </div>
             )}
           </For>
           </div>
