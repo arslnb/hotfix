@@ -139,6 +139,11 @@ type BrandGlyph = {
 type ProjectSectionTab = "logs" | "incidents" | "performance" | "settings";
 type ProjectRouteSection = "home" | ProjectSectionTab;
 type ProjectsSort = "created" | "alphabetical" | "items" | "incidents" | "lastActivity" | "indexing";
+type ProjectsSortDirection = "asc" | "desc";
+type ProjectsSortState = {
+  column: ProjectsSort;
+  direction: ProjectsSortDirection;
+};
 type ProjectsView = "list" | "grid";
 type ProjectRouteState = {
   slug: string | null;
@@ -738,7 +743,7 @@ function ProjectsTab(props: {
   onProjectSectionChange: (section: ProjectRouteSection) => void;
   onProjectOpenChange: (open: boolean) => void;
 }) {
-  const [sortBy, setSortBy] = createSignal<ProjectsSort>("created");
+  const [sortState, setSortState] = createSignal<ProjectsSortState | null>(null);
   const [viewMode, setViewMode] = createSignal<ProjectsView>("list");
   const [createModalOpen, setCreateModalOpen] = createSignal(false);
   const [settingsModalOpen, setSettingsModalOpen] = createSignal(false);
@@ -772,41 +777,68 @@ function ProjectsTab(props: {
 
   const sentryOrganizations = createMemo(() => dashboard()?.sentryOrganizations ?? []);
   const canCreateProject = createMemo(() => projectName().trim().length > 0 && !creating());
+  const cycleSort = (column: ProjectsSort) => {
+    setSortState((current) => {
+      if (!current || current.column !== column) {
+        return { column, direction: "asc" };
+      }
+
+      if (current.direction === "asc") {
+        return { column, direction: "desc" };
+      }
+
+      return null;
+    });
+  };
   const sortedProjects = createMemo(() => {
     const projects = [...(dashboard()?.projects ?? [])];
+    const state = sortState();
 
-    switch (sortBy()) {
+    if (!state) {
+      return projects;
+    }
+
+    const direction = state.direction === "asc" ? 1 : -1;
+    const applyDirection = (value: number) => value * direction;
+
+    switch (state.column) {
       case "alphabetical":
         projects.sort((left, right) =>
-          left.name.localeCompare(right.name, undefined, { sensitivity: "base" }),
+          applyDirection(
+            left.name.localeCompare(right.name, undefined, { sensitivity: "base" }),
+          ),
         );
         break;
       case "items":
-        projects.sort((left, right) => right.itemsCount - left.itemsCount);
+        projects.sort((left, right) => applyDirection(left.itemsCount - right.itemsCount));
         break;
       case "incidents":
-        projects.sort((left, right) => right.incidentCount - left.incidentCount);
+        projects.sort((left, right) => applyDirection(left.incidentCount - right.incidentCount));
         break;
       case "lastActivity":
-        projects.sort((left, right) => (right.lastActivityAt ?? 0) - (left.lastActivityAt ?? 0));
+        projects.sort((left, right) =>
+          applyDirection((left.lastActivityAt ?? 0) - (right.lastActivityAt ?? 0)),
+        );
         break;
       case "indexing":
         projects.sort((left, right) => {
           const byRank =
             getIndexingSortRank(left.indexingStatus) - getIndexingSortRank(right.indexingStatus);
           if (byRank !== 0) {
-            return byRank;
+            return applyDirection(byRank);
           }
 
-          return right.indexingPercentage - left.indexingPercentage;
+          return applyDirection(left.indexingPercentage - right.indexingPercentage);
         });
         break;
       case "created":
       default:
         projects.sort(
           (left, right) =>
-            getProjectCreatedAtTimestamp(right.createdAt) -
-            getProjectCreatedAtTimestamp(left.createdAt),
+            applyDirection(
+              getProjectCreatedAtTimestamp(left.createdAt) -
+                getProjectCreatedAtTimestamp(right.createdAt),
+            ),
         );
         break;
     }
@@ -1699,9 +1731,9 @@ function ProjectsTab(props: {
                               <th scope="col">
                                 <button
                                   class="projects-table-header-button"
-                                  classList={{ "is-active": sortBy() === "alphabetical" }}
+                                  classList={{ "is-active": sortState()?.column === "alphabetical" }}
                                   type="button"
-                                  onClick={() => setSortBy("alphabetical")}
+                                  onClick={() => cycleSort("alphabetical")}
                                 >
                                   <span>Name</span>
                                 </button>
@@ -1712,9 +1744,9 @@ function ProjectsTab(props: {
                               <th scope="col">
                                 <button
                                   class="projects-table-header-button"
-                                  classList={{ "is-active": sortBy() === "indexing" }}
+                                  classList={{ "is-active": sortState()?.column === "indexing" }}
                                   type="button"
-                                  onClick={() => setSortBy("indexing")}
+                                  onClick={() => cycleSort("indexing")}
                                 >
                                   <span>Indexing</span>
                                 </button>
@@ -1722,9 +1754,9 @@ function ProjectsTab(props: {
                               <th scope="col">
                                 <button
                                   class="projects-table-header-button"
-                                  classList={{ "is-active": sortBy() === "incidents" }}
+                                  classList={{ "is-active": sortState()?.column === "incidents" }}
                                   type="button"
-                                  onClick={() => setSortBy("incidents")}
+                                  onClick={() => cycleSort("incidents")}
                                 >
                                   <span>Incidents</span>
                                 </button>
@@ -1732,9 +1764,9 @@ function ProjectsTab(props: {
                               <th scope="col">
                                 <button
                                   class="projects-table-header-button"
-                                  classList={{ "is-active": sortBy() === "lastActivity" }}
+                                  classList={{ "is-active": sortState()?.column === "lastActivity" }}
                                   type="button"
-                                  onClick={() => setSortBy("lastActivity")}
+                                  onClick={() => cycleSort("lastActivity")}
                                 >
                                   <span>Last activity</span>
                                 </button>
@@ -1742,9 +1774,9 @@ function ProjectsTab(props: {
                               <th scope="col">
                                 <button
                                   class="projects-table-header-button"
-                                  classList={{ "is-active": sortBy() === "created" }}
+                                  classList={{ "is-active": sortState()?.column === "created" }}
                                   type="button"
-                                  onClick={() => setSortBy("created")}
+                                  onClick={() => cycleSort("created")}
                                 >
                                   <span>Created at</span>
                                 </button>
@@ -1904,7 +1936,9 @@ function ProjectsTab(props: {
                                   style={{
                                     "--filler-opacity": `${Math.max(
                                       0,
-                                      1 - (index + 1) / Math.max(tableFillerRows(), 1),
+                                      1 -
+                                        index /
+                                          Math.max(tableFillerRows() - 1, 1),
                                     )}`,
                                   }}
                                 >
