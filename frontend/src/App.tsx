@@ -145,6 +145,9 @@ type ProjectsSortState = {
   direction: ProjectsSortDirection;
 };
 type ProjectsView = "list" | "grid";
+const PROJECTS_GRID_COLUMNS = 5;
+const PROJECTS_GRID_ROW_HEIGHT = 132;
+
 type ProjectRouteState = {
   slug: string | null;
   section: ProjectRouteSection;
@@ -849,11 +852,14 @@ function ProjectsTab(props: {
   });
   const gridFillerItems = createMemo(() => {
     const count = gridFillerCells();
-    const totalRows = Math.max(Math.ceil(count / 6), 1);
+    const totalRows = Math.max(Math.ceil(count / PROJECTS_GRID_COLUMNS), 1);
 
     return Array.from({ length: count }, (_, index) => ({
       index,
-      opacity: Math.max(0, 1 - Math.floor(index / 6) / Math.max(totalRows - 1, 1)),
+      opacity: Math.max(
+        0,
+        1 - Math.floor(index / PROJECTS_GRID_COLUMNS) / Math.max(totalRows - 1, 1),
+      ),
     }));
   });
   const updateViewportFill = () => {
@@ -889,11 +895,10 @@ function ProjectsTab(props: {
 
       const rect = gridFrame.getBoundingClientRect();
       const remainingHeight = Math.max(0, window.innerHeight - rect.top - 32);
-      const columns = 6;
-      const rowHeight = 152;
-      const visibleRows = Math.max(1, Math.ceil(remainingHeight / rowHeight));
-      const visibleCells = visibleRows * columns;
-      const fillerCount = Math.max(0, visibleCells - sortedProjects().length);
+      const visibleRows = Math.max(1, Math.ceil(remainingHeight / PROJECTS_GRID_ROW_HEIGHT) - 2);
+      const visibleCells = visibleRows * PROJECTS_GRID_COLUMNS;
+      const totalGridItems = sortedProjects().length + 1;
+      const fillerCount = Math.max(0, visibleCells - totalGridItems);
       setGridFillerCells(Math.min(fillerCount, 72));
       return;
     }
@@ -2068,6 +2073,20 @@ function ProjectsTab(props: {
                           </div>
                         )}
                       </For>
+                      <div class="projects-grid-slot">
+                        <button
+                          class="project-card is-grid is-add-project"
+                          type="button"
+                          onClick={openCreateModal}
+                        >
+                          <div class="project-card-main">
+                            <div class="project-card-copy">
+                              <h2 class="project-card-title">Add new project</h2>
+                              <p class="project-card-meta">Create a blank workspace</p>
+                            </div>
+                          </div>
+                        </button>
+                      </div>
                       <For each={gridFillerItems()}>
                         {(item) => (
                           <div
