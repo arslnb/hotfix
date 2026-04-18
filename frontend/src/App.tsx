@@ -834,7 +834,7 @@ function ProjectsTab(props: {
     const rowHeight = 32;
     const headerHeight = 26;
     const visibleRows = Math.max(0, Math.floor((remainingHeight - headerHeight) / rowHeight));
-    const fillerCount = Math.max(0, visibleRows - sortedProjects().length - 10);
+    const fillerCount = Math.max(0, visibleRows - sortedProjects().length - 3);
     setTableFillerRows(Math.min(fillerCount, 24));
   };
   const selectedProject = createMemo(

@@ -665,6 +665,7 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
   width: 28px;
   height: 28px;
   padding: 0;
@@ -887,6 +888,7 @@ button {
   position: relative;
   display: inline-flex;
   align-items: center;
+  min-height: 28px;
   gap: 0.45rem;
 }
 
@@ -976,6 +978,10 @@ button {
   vertical-align: middle;
 }
 
+.projects-table-header th > * {
+  height: 28px;
+}
+
 .projects-table-header th + th {
   border-left: 1px solid rgba(255, 255, 255, 0.06);
 }
@@ -1038,7 +1044,9 @@ button {
 }
 
 .projects-table-header-spacer {
+  display: block;
   width: 100%;
+  height: 28px;
 }
 
 .projects-table-body {
@@ -1073,12 +1081,12 @@ button {
 }
 
 .projects-table-row.is-filler td {
-  background: rgba(255, 255, 255, calc(0.008 * var(--filler-opacity, 1))) !important;
-  border-bottom-color: rgba(255, 255, 255, calc(0.05 * var(--filler-opacity, 1)));
+  background: transparent !important;
+  border-bottom-color: rgba(255, 255, 255, calc(0.08 * var(--filler-opacity, 1)));
 }
 
 .projects-table-row.is-filler td + td {
-  border-left-color: rgba(255, 255, 255, calc(0.06 * var(--filler-opacity, 1)));
+  border-left-color: rgba(255, 255, 255, calc(0.09 * var(--filler-opacity, 1)));
 }
 
 .projects-table-cell {
@@ -1091,7 +1099,7 @@ button {
 }
 
 .projects-table-cell--activity {
-  padding-inline: 0;
+  padding: 0;
 }
 
 .projects-table-cell--actions {
@@ -1445,7 +1453,9 @@ button {
 }
 
 .project-card-stats.is-inline {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: stretch;
   min-width: 0;
   width: 100%;
   height: 100%;
@@ -1524,6 +1534,7 @@ button {
   align-items: center;
   justify-content: center;
   height: 100%;
+  min-height: 32px;
 }
 
 .project-card-menu-trigger {
@@ -1651,6 +1662,9 @@ button {
   min-width: 100%;
   height: 0.76rem;
   max-width: none;
+  margin: 0;
+  align-self: center;
+  flex: 1 1 auto;
 }
 
 .project-card.is-grid .project-sparkline {
