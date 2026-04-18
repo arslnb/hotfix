@@ -147,6 +147,7 @@ type ProjectsSortState = {
 type ProjectsView = "list" | "grid";
 const PROJECTS_GRID_COLUMNS = 5;
 const PROJECTS_GRID_ROW_HEIGHT = 132;
+const ADD_PROJECT_SELECTION_ID = "__add-project__";
 
 type ProjectRouteState = {
   slug: string | null;
@@ -1028,15 +1029,20 @@ function ProjectsTab(props: {
       return;
     }
 
-    const currentIndex = projects.findIndex((project) => project.id === selectedProjectId());
+    const selectionIds =
+      viewMode() === "grid"
+        ? [...projects.map((project) => project.id), ADD_PROJECT_SELECTION_ID]
+        : projects.map((project) => project.id);
+
+    const currentIndex = selectionIds.findIndex((id) => id === selectedProjectId());
     const baseIndex = currentIndex >= 0 ? currentIndex : 0;
-    const nextIndex = (baseIndex + direction + projects.length) % projects.length;
-    const nextProject = projects[nextIndex];
-    if (!nextProject) {
+    const nextIndex = (baseIndex + direction + selectionIds.length) % selectionIds.length;
+    const nextSelectionId = selectionIds[nextIndex];
+    if (!nextSelectionId) {
       return;
     }
 
-    setSelectedProjectId(nextProject.id);
+    setSelectedProjectId(nextSelectionId);
   };
 
   createEffect(() => {
@@ -1051,7 +1057,10 @@ function ProjectsTab(props: {
       return;
     }
 
-    if (!projects.some((project) => project.id === selectedProjectId())) {
+    if (
+      selectedProjectId() !== ADD_PROJECT_SELECTION_ID &&
+      !projects.some((project) => project.id === selectedProjectId())
+    ) {
       setSelectedProjectId(projects[0]?.id ?? null);
     }
 
@@ -1189,6 +1198,12 @@ function ProjectsTab(props: {
       if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
         event.preventDefault();
         moveProjectSelection(-1);
+        return;
+      }
+
+      if (event.key === "Enter" && selectedProjectId() === ADD_PROJECT_SELECTION_ID) {
+        event.preventDefault();
+        openCreateModal();
         return;
       }
 
@@ -2077,12 +2092,18 @@ function ProjectsTab(props: {
                         <button
                           class="project-card is-grid is-add-project"
                           type="button"
+                          classList={{
+                            "is-selected": selectedProjectId() === ADD_PROJECT_SELECTION_ID,
+                          }}
+                          aria-selected={selectedProjectId() === ADD_PROJECT_SELECTION_ID}
+                          onMouseEnter={() => setSelectedProjectId(ADD_PROJECT_SELECTION_ID)}
+                          onFocus={() => setSelectedProjectId(ADD_PROJECT_SELECTION_ID)}
                           onClick={openCreateModal}
                         >
                           <div class="project-card-main">
                             <div class="project-card-copy">
-                              <h2 class="project-card-title">Add new project</h2>
-                              <p class="project-card-meta">Create a blank workspace</p>
+                              <h2 class="project-card-title">Add project</h2>
+                              <p class="project-card-meta">Start a new project</p>
                             </div>
                           </div>
                         </button>

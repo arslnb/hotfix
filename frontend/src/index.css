@@ -1324,6 +1324,7 @@ button {
   height: 100%;
   border: none;
   border-radius: 0;
+  box-shadow: inset 0 0 0 1px transparent;
 }
 
 .project-card.is-grid:not(.is-selected) {
@@ -1379,6 +1380,14 @@ button {
 .project-card:focus-within {
   background: #101417;
   outline: none;
+}
+
+.project-card.is-grid:hover,
+.project-card.is-grid:focus-within,
+.project-card.is-grid.is-selected {
+  background: #060708;
+  box-shadow: inset 0 0 0 1px rgba(127, 220, 255, 0.84);
+  filter: none;
 }
 
 .project-card.is-selected {
@@ -1483,6 +1492,14 @@ button {
 
 .project-card.is-add-project .project-card-main {
   justify-content: center;
+  align-items: center;
+}
+
+.project-card.is-add-project .project-card-copy {
+  width: 100%;
+  padding: 0;
+  align-items: center;
+  text-align: center;
 }
 
 .project-card.is-add-project .project-card-title {
@@ -1494,8 +1511,9 @@ button {
 }
 
 .project-card.is-add-project:hover,
-.project-card.is-add-project:focus-visible {
-  background: rgba(9, 13, 16, 0.82);
+.project-card.is-add-project:focus-visible,
+.project-card.is-add-project.is-selected {
+  background: #060708;
 }
 
 .project-card:not(.is-grid) .project-card-meta {
