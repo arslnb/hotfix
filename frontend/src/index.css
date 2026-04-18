@@ -1063,10 +1063,9 @@ button {
   left: 0;
   right: 0;
   bottom: 1rem;
-  align-items: stretch;
-  gap: 0;
+  display: block;
   min-width: 0;
-  width: auto;
+  width: 100%;
   overflow: hidden;
   border-bottom-left-radius: inherit;
   border-bottom-right-radius: inherit;
@@ -1203,7 +1202,9 @@ button {
 }
 
 .project-card.is-grid .project-sparkline {
+  display: block;
   width: 100%;
+  max-width: none;
   height: 2rem;
 }
 
