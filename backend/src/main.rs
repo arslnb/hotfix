@@ -1155,7 +1155,7 @@ async fn main() -> Result<(), AppError> {
         .route("/hotfix-projects", post(create_hotfix_project))
         .route(
             "/hotfix-projects/{project_id}",
-            patch(update_hotfix_project),
+            patch(update_hotfix_project).delete(delete_hotfix_project),
         )
         .route(
             "/hotfix-projects/{project_id}/sentry-connection",
@@ -1419,6 +1419,28 @@ async fn update_hotfix_project(
 
     let payload = build_single_hotfix_project_payload(&state, user_id, project_id).await?;
     Ok(Json(payload))
+}
+
+async fn delete_hotfix_project(
+    State(state): State<AppState>,
+    session: Session,
+    AxumPath(project_id): AxumPath<Uuid>,
+) -> Result<StatusCode, AppError> {
+    let user_id = require_user_id(&session).await?;
+    ensure_hotfix_project_owner(&state.db, user_id, project_id).await?;
+
+    sqlx::query(
+        r#"
+        delete from hotfix_projects
+        where id = $1 and user_id = $2
+        "#,
+    )
+    .bind(project_id)
+    .bind(user_id)
+    .execute(&state.db)
+    .await?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn update_sentry_project_selection(

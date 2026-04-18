@@ -728,6 +728,15 @@ function ProjectsTab(props: {
   const [createModalOpen, setCreateModalOpen] = createSignal(false);
   const [settingsModalOpen, setSettingsModalOpen] = createSignal(false);
   const [accountMenuOpen, setAccountMenuOpen] = createSignal(false);
+  const [projectMenuOpenId, setProjectMenuOpenId] = createSignal<string | null>(null);
+  const [renameModalProjectId, setRenameModalProjectId] = createSignal<string | null>(null);
+  const [renameProjectName, setRenameProjectName] = createSignal("");
+  const [renameModalError, setRenameModalError] = createSignal<string | null>(null);
+  const [renaming, setRenaming] = createSignal(false);
+  const [deleteModalProjectId, setDeleteModalProjectId] = createSignal<string | null>(null);
+  const [deleteConfirmationValue, setDeleteConfirmationValue] = createSignal("");
+  const [deleteModalError, setDeleteModalError] = createSignal<string | null>(null);
+  const [deleting, setDeleting] = createSignal(false);
   const [projectName, setProjectName] = createSignal("");
   const [selectedProjectId, setSelectedProjectId] = createSignal<string | null>(null);
   const [openedProjectId, setOpenedProjectId] = createSignal<string | null>(null);
@@ -761,12 +770,59 @@ function ProjectsTab(props: {
   const openedProject = createMemo(() =>
     sortedProjects().find((project) => project.id === openedProjectId()) ?? null,
   );
+  const renameModalProject = createMemo(
+    () => sortedProjects().find((project) => project.id === renameModalProjectId()) ?? null,
+  );
+  const deleteModalProject = createMemo(
+    () => sortedProjects().find((project) => project.id === deleteModalProjectId()) ?? null,
+  );
+  const canConfirmDelete = createMemo(
+    () =>
+      Boolean(deleteModalProject()) &&
+      deleteConfirmationValue().trim() === deleteModalProject()!.name &&
+      !deleting(),
+  );
 
   const openCreateModal = () => {
     setProjectName("");
     setCreateError(null);
     setAccountMenuOpen(false);
+    setProjectMenuOpenId(null);
     setCreateModalOpen(true);
+  };
+
+  const openRenameModal = (project: HotfixProject) => {
+    setProjectMenuOpenId(null);
+    setRenameModalProjectId(project.id);
+    setRenameProjectName(project.name);
+    setRenameModalError(null);
+  };
+
+  const closeRenameModal = () => {
+    if (renaming()) {
+      return;
+    }
+
+    setRenameModalProjectId(null);
+    setRenameProjectName("");
+    setRenameModalError(null);
+  };
+
+  const openDeleteModal = (project: HotfixProject) => {
+    setProjectMenuOpenId(null);
+    setDeleteModalProjectId(project.id);
+    setDeleteConfirmationValue("");
+    setDeleteModalError(null);
+  };
+
+  const closeDeleteModal = () => {
+    if (deleting()) {
+      return;
+    }
+
+    setDeleteModalProjectId(null);
+    setDeleteConfirmationValue("");
+    setDeleteModalError(null);
   };
 
   const syncProjectUrl = (
@@ -929,15 +985,19 @@ function ProjectsTab(props: {
 
     const handlePointerDown = (event: MouseEvent) => {
       const target = event.target;
-      if (target instanceof HTMLElement && target.closest("[data-projects-account-menu]")) {
+      if (
+        target instanceof HTMLElement &&
+        (target.closest("[data-projects-account-menu]") || target.closest("[data-project-action-menu]"))
+      ) {
         return;
       }
 
       setAccountMenuOpen(false);
+      setProjectMenuOpenId(null);
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (createModalOpen() || settingsModalOpen()) {
+      if (createModalOpen() || settingsModalOpen() || renameModalProjectId() || deleteModalProjectId()) {
         return;
       }
 
@@ -995,7 +1055,12 @@ function ProjectsTab(props: {
   });
 
   createEffect(() => {
-    if (!createModalOpen() && !settingsModalOpen()) {
+    if (
+      !createModalOpen() &&
+      !settingsModalOpen() &&
+      !renameModalProjectId() &&
+      !deleteModalProjectId()
+    ) {
       return;
     }
 
@@ -1003,6 +1068,16 @@ function ProjectsTab(props: {
       if (event.key === "Escape") {
         if (createModalOpen()) {
           closeCreateModal();
+          return;
+        }
+
+        if (renameModalProjectId()) {
+          closeRenameModal();
+          return;
+        }
+
+        if (deleteModalProjectId()) {
+          closeDeleteModal();
           return;
         }
 
@@ -1101,6 +1176,96 @@ function ProjectsTab(props: {
     } catch (error) {
       mutate(previousDashboard);
       throw error;
+    }
+  };
+
+  const submitRenameModal = async (event: SubmitEvent) => {
+    event.preventDefault();
+    const project = renameModalProject();
+    if (!project) {
+      return;
+    }
+
+    const trimmedName = renameProjectName().trim();
+    if (!trimmedName) {
+      setRenameModalError("Project name cannot be empty.");
+      return;
+    }
+
+    setRenaming(true);
+    setRenameModalError(null);
+
+    try {
+      await renameProject(project.id, trimmedName);
+      setRenameModalProjectId(null);
+      setRenameProjectName("");
+      setRenameModalError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not rename the project.";
+      setRenameModalError(message);
+    } finally {
+      setRenaming(false);
+    }
+  };
+
+  const deleteProject = async (projectId: string) => {
+    const previousDashboard = dashboard();
+
+    mutate((payload) =>
+      payload
+        ? {
+            ...payload,
+            projects: payload.projects.filter((project) => project.id !== projectId),
+          }
+        : payload,
+    );
+
+    try {
+      const response = await fetch(`/api/hotfix-projects/${projectId}`, {
+        method: "DELETE",
+        headers: {
+          Accept: "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error ?? "Could not delete the project.");
+      }
+    } catch (error) {
+      mutate(previousDashboard);
+      throw error;
+    }
+  };
+
+  const submitDeleteModal = async (event: SubmitEvent) => {
+    event.preventDefault();
+    const project = deleteModalProject();
+    if (!project) {
+      return;
+    }
+
+    if (deleteConfirmationValue().trim() !== project.name) {
+      setDeleteModalError("Type the full project name to confirm deletion.");
+      return;
+    }
+
+    setDeleting(true);
+    setDeleteModalError(null);
+
+    try {
+      await deleteProject(project.id);
+      if (selectedProjectId() === project.id) {
+        setSelectedProjectId(null);
+      }
+      setDeleteModalProjectId(null);
+      setDeleteConfirmationValue("");
+      setDeleteModalError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not delete the project.";
+      setDeleteModalError(message);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -1424,38 +1589,71 @@ function ProjectsTab(props: {
               <div class="projects-collection" classList={{ "is-grid": viewMode() === "grid" }}>
                 <For each={sortedProjects()}>
                   {(project) => (
-                    <button
+                    <article
                       class="project-card"
                       classList={{
                         "is-grid": viewMode() === "grid",
                         "is-selected": selectedProjectId() === project.id,
                       }}
-                      type="button"
                       aria-selected={selectedProjectId() === project.id}
-                      onFocus={() => setSelectedProjectId(project.id)}
                       onMouseEnter={() => setSelectedProjectId(project.id)}
-                      onClick={() => openProject(project.id)}
                     >
-                      <div class="project-card-copy">
-                        <h2 class="project-card-title">{project.name}</h2>
-                        <Show when={viewMode() === "grid"}>
-                          <p class="project-card-subtitle">
-                            {project.sentryOrganization?.name ?? "No Sentry organization selected"}
-                          </p>
-                        </Show>
-                        <p class="project-card-meta">{formatProjectDate(project.createdAt)}</p>
-                      </div>
+                      <button
+                        class="project-card-main"
+                        type="button"
+                        onFocus={() => setSelectedProjectId(project.id)}
+                        onClick={() => openProject(project.id)}
+                      >
+                        <div class="project-card-copy">
+                          <h2 class="project-card-title">{project.name}</h2>
+                          <p class="project-card-meta">{formatProjectDate(project.createdAt)}</p>
+                        </div>
 
-                      <div class="project-card-stats" classList={{ "is-inline": viewMode() === "list" }}>
-                        <p class="project-card-count">
-                          {formatSentryProjectCount(project.sentryProjects.length)}
-                        </p>
-                        <ProjectSparkline
-                          seed={`${project.id}:${project.name}`}
-                          compact={viewMode() === "list"}
-                        />
+                        <div class="project-card-stats" classList={{ "is-inline": viewMode() === "list" }}>
+                          <ProjectSparkline
+                            seed={`${project.id}:${project.name}`}
+                            compact={viewMode() === "list"}
+                          />
+                        </div>
+                      </button>
+
+                      <div class="project-card-menu" data-project-action-menu>
+                        <button
+                          class="project-card-menu-trigger"
+                          type="button"
+                          aria-haspopup="menu"
+                          aria-expanded={projectMenuOpenId() === project.id}
+                          onClick={() =>
+                            setProjectMenuOpenId((current) => (current === project.id ? null : project.id))
+                          }
+                        >
+                          <span />
+                          <span />
+                          <span />
+                        </button>
+
+                        <Show when={projectMenuOpenId() === project.id}>
+                          <div class="project-card-popover" role="menu">
+                            <button
+                              class="project-card-popover-item"
+                              type="button"
+                              role="menuitem"
+                              onClick={() => openRenameModal(project)}
+                            >
+                              Rename
+                            </button>
+                            <button
+                              class="project-card-popover-item is-danger"
+                              type="button"
+                              role="menuitem"
+                              onClick={() => openDeleteModal(project)}
+                            >
+                              Delete project
+                            </button>
+                          </div>
+                        </Show>
                       </div>
-                    </button>
+                    </article>
                   )}
                 </For>
               </div>
@@ -1526,6 +1724,117 @@ function ProjectsTab(props: {
             </form>
           </div>
         </div>
+      </Show>
+
+      <Show when={renameModalProject()}>
+        {(project) => (
+          <div class="project-modal-backdrop" role="presentation" onClick={() => closeRenameModal()}>
+            <div
+              class="project-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="rename-project-title"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div class="project-modal-header">
+                <div>
+                  <h2 id="rename-project-title" class="project-modal-title">
+                    Rename project
+                  </h2>
+                </div>
+                <button class="project-modal-close" type="button" onClick={closeRenameModal} aria-label="Close">
+                  <span aria-hidden="true">×</span>
+                </button>
+              </div>
+
+              <form class="project-modal-form" onSubmit={(event) => void submitRenameModal(event)}>
+                <label class="project-field">
+                  <span class="project-field-label">Name</span>
+                  <input
+                    class="project-field-input"
+                    type="text"
+                    name="rename"
+                    value={renameProjectName()}
+                    onInput={(event) => setRenameProjectName(event.currentTarget.value)}
+                    autocomplete="off"
+                    maxlength={120}
+                  />
+                </label>
+
+                <Show when={renameModalError()}>
+                  {(message) => <p class="project-modal-error">{message()}</p>}
+                </Show>
+
+                <div class="project-modal-actions">
+                  <button class="project-modal-secondary" type="button" onClick={closeRenameModal}>
+                    Cancel
+                  </button>
+                  <button class="brand-button" type="submit" disabled={renaming()}>
+                    {renaming() ? "Renaming..." : `Rename ${project().name}`}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+      </Show>
+
+      <Show when={deleteModalProject()}>
+        {(project) => (
+          <div class="project-modal-backdrop" role="presentation" onClick={() => closeDeleteModal()}>
+            <div
+              class="project-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="delete-project-title"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div class="project-modal-header">
+                <div>
+                  <h2 id="delete-project-title" class="project-modal-title">
+                    Delete project
+                  </h2>
+                </div>
+                <button class="project-modal-close" type="button" onClick={closeDeleteModal} aria-label="Close">
+                  <span aria-hidden="true">×</span>
+                </button>
+              </div>
+
+              <form class="project-modal-form" onSubmit={(event) => void submitDeleteModal(event)}>
+                <p class="project-field-helper">
+                  This deletes <strong>{project().name}</strong> and all of its linked canvas data,
+                  incidents, and imported Sentry state. Type the full project name to confirm.
+                </p>
+
+                <label class="project-field">
+                  <span class="project-field-label">Confirm project name</span>
+                  <input
+                    class="project-field-input"
+                    type="text"
+                    name="delete-confirmation"
+                    value={deleteConfirmationValue()}
+                    onInput={(event) => setDeleteConfirmationValue(event.currentTarget.value)}
+                    autocomplete="off"
+                    spellcheck={false}
+                  />
+                </label>
+
+                <Show when={deleteModalError()}>
+                  {(message) => <p class="project-modal-error">{message()}</p>}
+                </Show>
+
+                <div class="project-modal-actions">
+                  <button class="project-modal-secondary" type="button" onClick={closeDeleteModal}>
+                    Cancel
+                  </button>
+                  <button class="brand-button brand-button-danger" type="submit" disabled={!canConfirmDelete()}>
+                    {deleting() ? "Deleting..." : "Delete project"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </Show>
 
       <Show when={settingsModalOpen()}>
