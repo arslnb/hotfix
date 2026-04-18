@@ -866,10 +866,16 @@ button {
   background: rgba(255, 255, 255, 0.08);
 }
 
+.projects-table-wrap {
+  margin-top: -1.6rem;
+  overflow-x: auto;
+}
+
 .projects-table {
   display: flex;
   flex-direction: column;
-  --projects-table-columns: minmax(0, 1.6fr) 10rem minmax(6rem, 0.8fr) 2.7rem;
+  min-width: 78rem;
+  --projects-table-columns: minmax(14rem, 1.6fr) 5.2rem 7.2rem 4.8rem 7.8rem 5.6rem 8.8rem 7.8rem 5.2rem 2.7rem;
 }
 
 .projects-table-header {
@@ -899,6 +905,7 @@ button {
 .projects-table-header-button,
 .projects-table-header-label {
   min-width: 0;
+  font-family: "Geist Mono", ui-monospace, "SFMono-Regular", "SF Mono", monospace;
   font-size: 0.66rem;
   line-height: 1;
   letter-spacing: 0.08em;
@@ -1143,13 +1150,13 @@ button {
 }
 
 .project-card.is-table-row .project-card-main {
-  grid-column: 1 / 4;
+  grid-column: 1 / 10;
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) 10rem minmax(6rem, 0.8fr);
+  grid-template-columns: minmax(14rem, 1.6fr) 5.2rem 7.2rem 4.8rem 7.8rem 5.6rem 8.8rem 7.8rem 5.2rem;
   align-items: center;
   gap: 0;
-  height: 40px;
-  min-height: 40px;
+  height: 36px;
+  min-height: 36px;
   padding: 0;
 }
 
@@ -1239,11 +1246,11 @@ button {
 }
 
 .project-card.is-table-row .project-card-title {
-  font-size: 0.9rem;
+  font-size: 0.84rem;
 }
 
 .project-card.is-table-row .project-card-meta {
-  font-size: 0.74rem;
+  font-size: 0.68rem;
   color: rgba(242, 238, 227, 0.34);
 }
 
@@ -1265,9 +1272,55 @@ button {
 .project-card-stats.is-inline {
   flex-direction: row;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.35rem;
   min-width: 0;
   flex-shrink: 0;
+}
+
+.project-connection-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+}
+
+.project-connection-icon {
+  width: 0.78rem;
+  height: 0.78rem;
+  opacity: 0.72;
+  filter: grayscale(1) brightness(1.12);
+}
+
+.project-health-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 1rem;
+  padding: 0 0.35rem;
+  border-radius: 3px;
+  font-size: 0.62rem;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.project-health-chip.is-muted {
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(242, 238, 227, 0.42);
+}
+
+.project-health-chip.is-ok {
+  background: rgba(82, 173, 255, 0.08);
+  color: rgba(164, 240, 255, 0.84);
+}
+
+.project-health-chip.is-warn {
+  background: rgba(255, 194, 92, 0.09);
+  color: rgba(255, 213, 128, 0.86);
+}
+
+.project-health-chip.is-danger {
+  background: rgba(217, 86, 86, 0.12);
+  color: rgba(255, 177, 177, 0.9);
 }
 
 .project-card.is-grid .project-card-stats {
@@ -1293,7 +1346,7 @@ button {
   position: relative;
   top: auto;
   right: auto;
-  grid-column: 4;
+  grid-column: 10;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1421,8 +1474,8 @@ button {
 }
 
 .project-card-stats.is-inline .project-sparkline {
-  width: 1.9rem;
-  height: 0.42rem;
+  width: 1.45rem;
+  height: 0.34rem;
 }
 
 .project-card.is-grid .project-sparkline {

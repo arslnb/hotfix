@@ -73,6 +73,13 @@ type HotfixProject = {
   name: string;
   slug: string;
   createdAt: number | string;
+  lastActivityAt: number | null;
+  itemsCount: number;
+  incidentCount: number;
+  githubConnected: boolean;
+  sentryConnected: boolean;
+  indexingStatus: string;
+  indexingPercentage: number;
   sentryOrganization: SentryOrganizationSummary | null;
   sentryProjects: ImportedSentryProject[];
 };
@@ -131,7 +138,7 @@ type BrandGlyph = {
 };
 type ProjectSectionTab = "logs" | "incidents" | "performance" | "settings";
 type ProjectRouteSection = "home" | ProjectSectionTab;
-type ProjectsSort = "created" | "alphabetical";
+type ProjectsSort = "created" | "alphabetical" | "items" | "incidents" | "lastActivity" | "indexing";
 type ProjectsView = "list" | "grid";
 type ProjectRouteState = {
   slug: string | null;
@@ -766,18 +773,42 @@ function ProjectsTab(props: {
   const sortedProjects = createMemo(() => {
     const projects = [...(dashboard()?.projects ?? [])];
 
-    if (sortBy() === "alphabetical") {
-      projects.sort((left, right) =>
-        left.name.localeCompare(right.name, undefined, { sensitivity: "base" }),
-      );
-      return projects;
+    switch (sortBy()) {
+      case "alphabetical":
+        projects.sort((left, right) =>
+          left.name.localeCompare(right.name, undefined, { sensitivity: "base" }),
+        );
+        break;
+      case "items":
+        projects.sort((left, right) => right.itemsCount - left.itemsCount);
+        break;
+      case "incidents":
+        projects.sort((left, right) => right.incidentCount - left.incidentCount);
+        break;
+      case "lastActivity":
+        projects.sort((left, right) => (right.lastActivityAt ?? 0) - (left.lastActivityAt ?? 0));
+        break;
+      case "indexing":
+        projects.sort((left, right) => {
+          const byRank =
+            getIndexingSortRank(left.indexingStatus) - getIndexingSortRank(right.indexingStatus);
+          if (byRank !== 0) {
+            return byRank;
+          }
+
+          return right.indexingPercentage - left.indexingPercentage;
+        });
+        break;
+      case "created":
+      default:
+        projects.sort(
+          (left, right) =>
+            getProjectCreatedAtTimestamp(right.createdAt) -
+            getProjectCreatedAtTimestamp(left.createdAt),
+        );
+        break;
     }
 
-    projects.sort(
-      (left, right) =>
-        getProjectCreatedAtTimestamp(right.createdAt) -
-        getProjectCreatedAtTimestamp(left.createdAt),
-    );
     return projects;
   });
   const selectedProject = createMemo(
@@ -1608,107 +1639,196 @@ function ProjectsTab(props: {
                   fallback={
                     <div class="projects-table-wrap">
                       <div class="projects-table">
-                      <div class="projects-table-header" role="row">
-                        <button
-                          class="projects-table-header-button"
-                          classList={{ "is-active": sortBy() === "alphabetical" }}
-                          type="button"
-                          onClick={() => setSortBy("alphabetical")}
-                        >
-                          <span>Name</span>
-                        </button>
-                        <button
-                          class="projects-table-header-button"
-                          classList={{ "is-active": sortBy() === "created" }}
-                          type="button"
-                          onClick={() => setSortBy("created")}
-                        >
-                          <span>Created at</span>
-                        </button>
-                        <div class="projects-table-header-label">Activity</div>
-                        <div class="projects-table-header-spacer" aria-hidden="true" />
-                      </div>
+                        <div class="projects-table-header" role="row">
+                          <button
+                            class="projects-table-header-button"
+                            classList={{ "is-active": sortBy() === "alphabetical" }}
+                            type="button"
+                            onClick={() => setSortBy("alphabetical")}
+                          >
+                            <span>Name</span>
+                          </button>
+                          <div class="projects-table-header-label">Connections</div>
+                          <div class="projects-table-header-label">Health</div>
+                          <button
+                            class="projects-table-header-button"
+                            classList={{ "is-active": sortBy() === "items" }}
+                            type="button"
+                            onClick={() => setSortBy("items")}
+                          >
+                            <span>Items</span>
+                          </button>
+                          <button
+                            class="projects-table-header-button"
+                            classList={{ "is-active": sortBy() === "indexing" }}
+                            type="button"
+                            onClick={() => setSortBy("indexing")}
+                          >
+                            <span>Indexing</span>
+                          </button>
+                          <button
+                            class="projects-table-header-button"
+                            classList={{ "is-active": sortBy() === "incidents" }}
+                            type="button"
+                            onClick={() => setSortBy("incidents")}
+                          >
+                            <span>Incidents</span>
+                          </button>
+                          <button
+                            class="projects-table-header-button"
+                            classList={{ "is-active": sortBy() === "lastActivity" }}
+                            type="button"
+                            onClick={() => setSortBy("lastActivity")}
+                          >
+                            <span>Last activity</span>
+                          </button>
+                          <button
+                            class="projects-table-header-button"
+                            classList={{ "is-active": sortBy() === "created" }}
+                            type="button"
+                            onClick={() => setSortBy("created")}
+                          >
+                            <span>Created at</span>
+                          </button>
+                          <div class="projects-table-header-label">Activity</div>
+                          <div class="projects-table-header-spacer" aria-hidden="true" />
+                        </div>
 
-                      <div class="projects-collection is-table">
-                        <For each={sortedProjects()}>
-                          {(project) => (
-                            <article
-                              class="project-card is-table-row"
-                              classList={{
-                                "is-selected": selectedProjectId() === project.id,
-                              }}
-                              aria-selected={selectedProjectId() === project.id}
-                              onMouseEnter={() => setSelectedProjectId(project.id)}
-                            >
-                              <button
-                                class="project-card-main"
-                                type="button"
-                                onFocus={() => setSelectedProjectId(project.id)}
-                                onClick={() => openProject(project.id)}
+                        <div class="projects-collection is-table">
+                          <For each={sortedProjects()}>
+                            {(project) => (
+                              <article
+                                class="project-card is-table-row"
+                                classList={{
+                                  "is-selected": selectedProjectId() === project.id,
+                                }}
+                                aria-selected={selectedProjectId() === project.id}
+                                onMouseEnter={() => setSelectedProjectId(project.id)}
                               >
-                                <div class="project-card-cell project-card-cell--name">
-                                  <h2 class="project-card-title">{project.name}</h2>
-                                </div>
-
-                                <div class="project-card-cell project-card-cell--created">
-                                  <p class="project-card-meta">
-                                    {formatProjectDate(project.createdAt)}
-                                  </p>
-                                </div>
-
-                                <div class="project-card-cell project-card-cell--activity">
-                                  <div class="project-card-stats is-inline">
-                                    <ProjectSparkline
-                                      seed={`${project.id}:${project.name}`}
-                                      compact={true}
-                                    />
-                                  </div>
-                                </div>
-                              </button>
-
-                              <div class="project-card-menu" data-project-action-menu>
                                 <button
-                                  class="project-card-menu-trigger"
+                                  class="project-card-main"
                                   type="button"
-                                  aria-haspopup="menu"
-                                  aria-expanded={projectMenuOpenId() === project.id}
-                                  onClick={() =>
-                                    setProjectMenuOpenId((current) =>
-                                      current === project.id ? null : project.id,
-                                    )
-                                  }
+                                  onFocus={() => setSelectedProjectId(project.id)}
+                                  onClick={() => openProject(project.id)}
                                 >
-                                  <span />
-                                  <span />
-                                  <span />
+                                  <div class="project-card-cell project-card-cell--name">
+                                    <h2 class="project-card-title">{project.name}</h2>
+                                  </div>
+
+                                  <div class="project-card-cell project-card-cell--connections">
+                                    <div class="project-connection-icons">
+                                      <Show when={project.githubConnected}>
+                                        <img
+                                          class="project-connection-icon"
+                                          src={githubIcon}
+                                          alt="GitHub connected"
+                                          title="GitHub connected"
+                                        />
+                                      </Show>
+                                      <Show when={project.sentryConnected}>
+                                        <img
+                                          class="project-connection-icon"
+                                          src={sentryIcon}
+                                          alt="Sentry connected"
+                                          title="Sentry connected"
+                                        />
+                                      </Show>
+                                    </div>
+                                  </div>
+
+                                  <div class="project-card-cell project-card-cell--health">
+                                    {(() => {
+                                      const health = getProjectHealth(project);
+                                      return (
+                                        <span class={`project-health-chip is-${health.tone}`}>
+                                          {health.label}
+                                        </span>
+                                      );
+                                    })()}
+                                  </div>
+
+                                  <div class="project-card-cell project-card-cell--items">
+                                    <p class="project-card-meta">{project.itemsCount}</p>
+                                  </div>
+
+                                  <div class="project-card-cell project-card-cell--indexing">
+                                    <p class="project-card-meta">
+                                      {formatIndexingStatus(
+                                        project.indexingStatus,
+                                        project.indexingPercentage,
+                                      )}
+                                    </p>
+                                  </div>
+
+                                  <div class="project-card-cell project-card-cell--incidents">
+                                    <p class="project-card-meta">{project.incidentCount}</p>
+                                  </div>
+
+                                  <div class="project-card-cell project-card-cell--last-activity">
+                                    <p class="project-card-meta">
+                                      {formatProjectLastActivity(project.lastActivityAt)}
+                                    </p>
+                                  </div>
+
+                                  <div class="project-card-cell project-card-cell--created">
+                                    <p class="project-card-meta">
+                                      {formatProjectDate(project.createdAt)}
+                                    </p>
+                                  </div>
+
+                                  <div class="project-card-cell project-card-cell--activity">
+                                    <div class="project-card-stats is-inline">
+                                      <ProjectSparkline
+                                        seed={`${project.id}:${project.name}`}
+                                        compact={true}
+                                      />
+                                    </div>
+                                  </div>
                                 </button>
 
-                                <Show when={projectMenuOpenId() === project.id}>
-                                  <div class="project-card-popover" role="menu">
-                                    <button
-                                      class="project-card-popover-item"
-                                      type="button"
-                                      role="menuitem"
-                                      onClick={() => openRenameModal(project)}
-                                    >
-                                      Rename
-                                    </button>
-                                    <button
-                                      class="project-card-popover-item is-danger"
-                                      type="button"
-                                      role="menuitem"
-                                      onClick={() => openDeleteModal(project)}
-                                    >
-                                      Delete project
-                                    </button>
-                                  </div>
-                                </Show>
-                              </div>
-                            </article>
-                          )}
-                        </For>
+                                <div class="project-card-menu" data-project-action-menu>
+                                  <button
+                                    class="project-card-menu-trigger"
+                                    type="button"
+                                    aria-haspopup="menu"
+                                    aria-expanded={projectMenuOpenId() === project.id}
+                                    onClick={() =>
+                                      setProjectMenuOpenId((current) =>
+                                        current === project.id ? null : project.id,
+                                      )
+                                    }
+                                  >
+                                    <span />
+                                    <span />
+                                    <span />
+                                  </button>
+
+                                  <Show when={projectMenuOpenId() === project.id}>
+                                    <div class="project-card-popover" role="menu">
+                                      <button
+                                        class="project-card-popover-item"
+                                        type="button"
+                                        role="menuitem"
+                                        onClick={() => openRenameModal(project)}
+                                      >
+                                        Rename
+                                      </button>
+                                      <button
+                                        class="project-card-popover-item is-danger"
+                                        type="button"
+                                        role="menuitem"
+                                        onClick={() => openDeleteModal(project)}
+                                      >
+                                        Delete project
+                                      </button>
+                                    </div>
+                                  </Show>
+                                </div>
+                              </article>
+                            )}
+                          </For>
+                        </div>
                       </div>
-                    </div>
                     </div>
                   }
                 >
@@ -3112,6 +3232,83 @@ function formatProjectDate(createdAt: number | string) {
     day: "numeric",
     year: "numeric",
   }).format(date);
+}
+
+function formatProjectLastActivity(timestamp: number | null) {
+  if (!timestamp) {
+    return "Never";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(timestamp));
+}
+
+function formatIndexingStatus(status: string, percentage: number) {
+  switch (status) {
+    case "indexed":
+      return "Indexed";
+    case "indexing":
+      return `Indexing ${percentage}%`;
+    case "queued":
+      return "Queued";
+    case "pending":
+      return "Pending";
+    case "failed":
+      return "Failed";
+    case "not_indexed":
+    default:
+      return "Not indexed";
+  }
+}
+
+function getIndexingSortRank(status: string) {
+  switch (status) {
+    case "failed":
+      return 0;
+    case "indexing":
+      return 1;
+    case "queued":
+      return 2;
+    case "pending":
+      return 3;
+    case "indexed":
+      return 4;
+    case "not_indexed":
+    default:
+      return 5;
+  }
+}
+
+function getProjectHealth(project: HotfixProject) {
+  if (project.incidentCount > 0) {
+    return { label: "Issues", tone: "danger" as const };
+  }
+
+  if (project.indexingStatus === "failed") {
+    return { label: "Blocked", tone: "danger" as const };
+  }
+
+  if (
+    project.indexingStatus === "indexing" ||
+    project.indexingStatus === "queued" ||
+    project.indexingStatus === "pending"
+  ) {
+    return { label: "Indexing", tone: "warn" as const };
+  }
+
+  if (project.itemsCount === 0) {
+    return { label: "Blank", tone: "muted" as const };
+  }
+
+  if (project.githubConnected || project.sentryConnected) {
+    return { label: "Healthy", tone: "ok" as const };
+  }
+
+  return { label: "Setup", tone: "muted" as const };
 }
 
 function formatHeaderClock(timestamp: number, timeZone?: string) {

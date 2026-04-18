@@ -539,6 +539,13 @@ struct HotfixProjectPayload {
     name: String,
     slug: String,
     created_at: i64,
+    last_activity_at: Option<i64>,
+    items_count: i64,
+    incident_count: i64,
+    github_connected: bool,
+    sentry_connected: bool,
+    indexing_status: String,
+    indexing_percentage: i32,
     sentry_organization: Option<SentryOrganizationSummary>,
     sentry_projects: Vec<ImportedSentryProjectPayload>,
 }
@@ -752,6 +759,13 @@ struct HotfixProjectRow {
     name: String,
     slug: String,
     created_at: OffsetDateTime,
+    last_activity_at: Option<OffsetDateTime>,
+    items_count: i64,
+    incident_count: i64,
+    github_connected: bool,
+    sentry_connected: bool,
+    indexing_status: String,
+    indexing_percentage: i32,
     sentry_connection_id: Option<Uuid>,
     sentry_slug: Option<String>,
     sentry_name: Option<String>,
@@ -3371,17 +3385,134 @@ async fn build_dashboard_payload(
 
     let project_rows = sqlx::query_as::<_, HotfixProjectRow>(
         r#"
+        with node_metrics as (
+            select
+                hotfix_project_graph_nodes.hotfix_project_id,
+                count(*) filter (where not hotfix_project_graph_nodes.is_system) as items_count,
+                coalesce(
+                    bool_or(hotfix_project_graph_nodes.github_repo_id is not null)
+                        filter (where not hotfix_project_graph_nodes.is_system),
+                    false
+                ) as github_connected,
+                coalesce(
+                    bool_or(
+                        coalesce(
+                            hotfix_project_graph_nodes.linked_imported_sentry_project_id,
+                            hotfix_project_graph_nodes.imported_sentry_project_id
+                        ) is not null
+                    ) filter (where not hotfix_project_graph_nodes.is_system),
+                    false
+                ) as sentry_connected,
+                count(*) filter (
+                    where not hotfix_project_graph_nodes.is_system
+                        and hotfix_project_graph_nodes.github_repo_id is not null
+                ) as github_item_count,
+                coalesce(
+                    bool_or(hotfix_project_graph_nodes.indexing_status = 'failed') filter (
+                        where not hotfix_project_graph_nodes.is_system
+                            and hotfix_project_graph_nodes.github_repo_id is not null
+                    ),
+                    false
+                ) as has_failed,
+                coalesce(
+                    bool_or(hotfix_project_graph_nodes.indexing_status = 'indexing') filter (
+                        where not hotfix_project_graph_nodes.is_system
+                            and hotfix_project_graph_nodes.github_repo_id is not null
+                    ),
+                    false
+                ) as has_indexing,
+                coalesce(
+                    bool_or(hotfix_project_graph_nodes.indexing_status = 'queued') filter (
+                        where not hotfix_project_graph_nodes.is_system
+                            and hotfix_project_graph_nodes.github_repo_id is not null
+                    ),
+                    false
+                ) as has_queued,
+                coalesce(
+                    bool_or(hotfix_project_graph_nodes.indexing_status = 'pending') filter (
+                        where not hotfix_project_graph_nodes.is_system
+                            and hotfix_project_graph_nodes.github_repo_id is not null
+                    ),
+                    false
+                ) as has_pending,
+                coalesce(
+                    bool_and(hotfix_project_graph_nodes.indexing_status = 'indexed') filter (
+                        where not hotfix_project_graph_nodes.is_system
+                            and hotfix_project_graph_nodes.github_repo_id is not null
+                    ),
+                    false
+                ) as all_indexed,
+                coalesce(
+                    round(avg(hotfix_project_graph_nodes.indexing_percentage::numeric) filter (
+                        where not hotfix_project_graph_nodes.is_system
+                            and hotfix_project_graph_nodes.github_repo_id is not null
+                    )),
+                    0
+                )::int as indexing_percentage,
+                max(hotfix_project_graph_nodes.updated_at) filter (
+                    where not hotfix_project_graph_nodes.is_system
+                ) as node_last_activity_at
+            from hotfix_project_graph_nodes
+            group by hotfix_project_graph_nodes.hotfix_project_id
+        ),
+        incident_metrics as (
+            select
+                hotfix_incidents.hotfix_project_id,
+                count(*) filter (
+                    where hotfix_incidents.status not in ('resolved', 'ignored')
+                ) as incident_count,
+                max(coalesce(hotfix_incidents.last_seen_at, hotfix_incidents.updated_at, hotfix_incidents.created_at))
+                    as incident_last_activity_at
+            from hotfix_incidents
+            group by hotfix_incidents.hotfix_project_id
+        ),
+        sentry_metrics as (
+            select
+                imported_sentry_projects.hotfix_project_id,
+                max(imported_sentry_projects.updated_at) as sentry_last_activity_at
+            from imported_sentry_projects
+            group by imported_sentry_projects.hotfix_project_id
+        )
         select
             hotfix_projects.id,
             hotfix_projects.name,
             hotfix_projects.slug,
             hotfix_projects.created_at,
+            greatest(
+                hotfix_projects.updated_at,
+                coalesce(node_metrics.node_last_activity_at, hotfix_projects.updated_at),
+                coalesce(incident_metrics.incident_last_activity_at, hotfix_projects.updated_at),
+                coalesce(sentry_metrics.sentry_last_activity_at, hotfix_projects.updated_at)
+            ) as last_activity_at,
+            coalesce(node_metrics.items_count, 0) as items_count,
+            coalesce(incident_metrics.incident_count, 0) as incident_count,
+            coalesce(node_metrics.github_connected, false) as github_connected,
+            (
+                hotfix_projects.sentry_connection_id is not null
+                or coalesce(node_metrics.sentry_connected, false)
+            ) as sentry_connected,
+            case
+                when coalesce(node_metrics.github_item_count, 0) = 0 then 'not_indexed'
+                when coalesce(node_metrics.has_failed, false) then 'failed'
+                when coalesce(node_metrics.has_indexing, false) then 'indexing'
+                when coalesce(node_metrics.has_queued, false) then 'queued'
+                when coalesce(node_metrics.has_pending, false) then 'pending'
+                when coalesce(node_metrics.all_indexed, false) then 'indexed'
+                else 'not_indexed'
+            end as indexing_status,
+            coalesce(node_metrics.indexing_percentage, 0) as indexing_percentage,
             hotfix_projects.sentry_connection_id,
             provider_connections.slug as sentry_slug,
             provider_connections.display_name as sentry_name
         from hotfix_projects
         left join provider_connections
             on provider_connections.id = hotfix_projects.sentry_connection_id
+        left join node_metrics
+            on node_metrics.hotfix_project_id = hotfix_projects.id
+        left join incident_metrics
+            on incident_metrics.hotfix_project_id = hotfix_projects.id
+        left join sentry_metrics
+            on sentry_metrics.hotfix_project_id = hotfix_projects.id
         where hotfix_projects.user_id = $1
         order by hotfix_projects.created_at asc
         "#,
@@ -3474,6 +3605,15 @@ async fn build_dashboard_payload(
                 name: project.name,
                 slug: project.slug,
                 created_at: (project.created_at.unix_timestamp_nanos() / 1_000_000) as i64,
+                last_activity_at: project
+                    .last_activity_at
+                    .map(|timestamp| (timestamp.unix_timestamp_nanos() / 1_000_000) as i64),
+                items_count: project.items_count,
+                incident_count: project.incident_count,
+                github_connected: project.github_connected,
+                sentry_connected: project.sentry_connected,
+                indexing_status: project.indexing_status,
+                indexing_percentage: project.indexing_percentage,
                 sentry_organization,
                 sentry_projects,
             }
