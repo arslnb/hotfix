@@ -830,7 +830,7 @@ function ProjectsTab(props: {
     }
 
     const rect = tableWrap.getBoundingClientRect();
-    const remainingHeight = Math.max(0, window.innerHeight - rect.top);
+    const remainingHeight = Math.max(0, window.innerHeight - rect.top - 40);
     const rowHeight = 32;
     const headerHeight = 26;
     const visibleRows = Math.max(0, Math.floor((remainingHeight - headerHeight) / rowHeight));
@@ -1862,11 +1862,18 @@ function ProjectsTab(props: {
                           </For>
                           <For each={Array.from({ length: tableFillerRows() }, (_, index) => index)}>
                             {(index) => (
-                              <div class="project-card is-table-row is-filler" aria-hidden="true">
+                              <div
+                                class="project-card is-table-row is-filler"
+                                aria-hidden="true"
+                                style={{
+                                  opacity: `${Math.max(
+                                    0.1,
+                                    1 - ((index + 1) / (tableFillerRows() + 1)) * 0.92,
+                                  )}`,
+                                }}
+                              >
                                 <div class="project-card-main">
-                                  <div class="project-card-cell project-card-cell--index">
-                                    <p class="project-card-meta">{sortedProjects().length + index + 1}</p>
-                                  </div>
+                                  <div class="project-card-cell project-card-cell--index" />
                                   <div class="project-card-cell project-card-cell--name" />
                                   <div class="project-card-cell project-card-cell--health" />
                                   <div class="project-card-cell project-card-cell--indexing" />
