@@ -663,7 +663,6 @@ button {
   align-self: center;
   height: 28px;
   position: relative;
-  top: 1px;
   line-height: 0;
 }
 
@@ -1690,7 +1689,7 @@ button {
 .project-card-stats.is-inline .project-sparkline {
   width: 100%;
   min-width: 0;
-  height: 0.76rem;
+  height: 0.92rem;
   max-width: none;
   margin: 0;
   justify-self: stretch;
@@ -1702,7 +1701,7 @@ button {
   width: 100%;
   min-width: 0;
   max-width: none;
-  height: 0.76rem;
+  height: 0.92rem;
   margin: 0;
 }
 
