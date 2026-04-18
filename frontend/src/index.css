@@ -1062,7 +1062,7 @@ button {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 0.6rem;
+  bottom: 1rem;
   align-items: stretch;
   gap: 0;
   min-width: 0;
