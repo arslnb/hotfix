@@ -2749,7 +2749,7 @@ function ViewModeIcon(props: { mode: ProjectsView }) {
 }
 
 function ProjectsMatrixBackdrop() {
-  const columnCount = 56;
+  const columnCount = 124;
   const columns = Array.from({ length: columnCount }, (_, index) => {
     const glyphCount = 22 + (index % 7);
     const characters = Array.from({ length: glyphCount }, (_, characterIndex) => ({
