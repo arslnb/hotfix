@@ -1033,6 +1033,10 @@ button {
   min-height: 7.85rem;
 }
 
+.project-card:not(.is-grid) {
+  border-radius: 0;
+}
+
 .project-card.is-grid .project-card-main {
   position: relative;
   flex-direction: column;
