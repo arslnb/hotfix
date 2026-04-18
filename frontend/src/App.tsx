@@ -1586,77 +1586,146 @@ function ProjectsTab(props: {
                 </div>
               }
             >
-              <div class="projects-collection" classList={{ "is-grid": viewMode() === "grid" }}>
-                <For each={sortedProjects()}>
-                  {(project) => (
-                    <article
-                      class="project-card"
-                      classList={{
-                        "is-grid": viewMode() === "grid",
-                        "is-selected": selectedProjectId() === project.id,
-                      }}
-                      aria-selected={selectedProjectId() === project.id}
-                      onMouseEnter={() => setSelectedProjectId(project.id)}
-                    >
-                      <button
-                        class="project-card-main"
-                        type="button"
-                        onFocus={() => setSelectedProjectId(project.id)}
-                        onClick={() => openProject(project.id)}
-                      >
-                        <div class="project-card-copy">
-                          <h2 class="project-card-title">{project.name}</h2>
-                          <p class="project-card-meta">{formatProjectDate(project.createdAt)}</p>
-                        </div>
-
-                        <div class="project-card-stats" classList={{ "is-inline": viewMode() === "list" }}>
-                          <ProjectSparkline
-                            seed={`${project.id}:${project.name}`}
-                            compact={viewMode() === "list"}
-                          />
-                        </div>
-                      </button>
-
-                      <div class="project-card-menu" data-project-action-menu>
-                        <button
-                          class="project-card-menu-trigger"
-                          type="button"
-                          aria-haspopup="menu"
-                          aria-expanded={projectMenuOpenId() === project.id}
-                          onClick={() =>
-                            setProjectMenuOpenId((current) => (current === project.id ? null : project.id))
-                          }
+              <Show
+                when={viewMode() === "grid"}
+                fallback={
+                  <div class="projects-collection">
+                    <For each={sortedProjects()}>
+                      {(project) => (
+                        <article
+                          class="project-card"
+                          classList={{
+                            "is-selected": selectedProjectId() === project.id,
+                          }}
+                          aria-selected={selectedProjectId() === project.id}
+                          onMouseEnter={() => setSelectedProjectId(project.id)}
                         >
-                          <span />
-                          <span />
-                          <span />
+                          <button
+                            class="project-card-main"
+                            type="button"
+                            onFocus={() => setSelectedProjectId(project.id)}
+                            onClick={() => openProject(project.id)}
+                          >
+                            <div class="project-card-copy">
+                              <h2 class="project-card-title">{project.name}</h2>
+                              <p class="project-card-meta">{formatProjectDate(project.createdAt)}</p>
+                            </div>
+
+                            <div class="project-card-stats is-inline">
+                              <ProjectSparkline seed={`${project.id}:${project.name}`} compact={true} />
+                            </div>
+                          </button>
+
+                          <div class="project-card-menu" data-project-action-menu>
+                            <button
+                              class="project-card-menu-trigger"
+                              type="button"
+                              aria-haspopup="menu"
+                              aria-expanded={projectMenuOpenId() === project.id}
+                              onClick={() =>
+                                setProjectMenuOpenId((current) => (current === project.id ? null : project.id))
+                              }
+                            >
+                              <span />
+                              <span />
+                              <span />
+                            </button>
+
+                            <Show when={projectMenuOpenId() === project.id}>
+                              <div class="project-card-popover" role="menu">
+                                <button
+                                  class="project-card-popover-item"
+                                  type="button"
+                                  role="menuitem"
+                                  onClick={() => openRenameModal(project)}
+                                >
+                                  Rename
+                                </button>
+                                <button
+                                  class="project-card-popover-item is-danger"
+                                  type="button"
+                                  role="menuitem"
+                                  onClick={() => openDeleteModal(project)}
+                                >
+                                  Delete project
+                                </button>
+                              </div>
+                            </Show>
+                          </div>
+                        </article>
+                      )}
+                    </For>
+                  </div>
+                }
+              >
+                <div class="projects-collection is-grid">
+                  <For each={sortedProjects()}>
+                    {(project) => (
+                      <article
+                        class="project-card is-grid"
+                        classList={{
+                          "is-selected": selectedProjectId() === project.id,
+                        }}
+                        aria-selected={selectedProjectId() === project.id}
+                        onMouseEnter={() => setSelectedProjectId(project.id)}
+                      >
+                        <button
+                          class="project-card-main"
+                          type="button"
+                          onFocus={() => setSelectedProjectId(project.id)}
+                          onClick={() => openProject(project.id)}
+                        >
+                          <div class="project-card-copy">
+                            <h2 class="project-card-title">{project.name}</h2>
+                            <p class="project-card-meta">{formatProjectDate(project.createdAt)}</p>
+                          </div>
+
+                          <div class="project-card-stats">
+                            <ProjectSparkline seed={`${project.id}:${project.name}`} compact={false} />
+                          </div>
                         </button>
 
-                        <Show when={projectMenuOpenId() === project.id}>
-                          <div class="project-card-popover" role="menu">
-                            <button
-                              class="project-card-popover-item"
-                              type="button"
-                              role="menuitem"
-                              onClick={() => openRenameModal(project)}
-                            >
-                              Rename
-                            </button>
-                            <button
-                              class="project-card-popover-item is-danger"
-                              type="button"
-                              role="menuitem"
-                              onClick={() => openDeleteModal(project)}
-                            >
-                              Delete project
-                            </button>
-                          </div>
-                        </Show>
-                      </div>
-                    </article>
-                  )}
-                </For>
-              </div>
+                        <div class="project-card-menu" data-project-action-menu>
+                          <button
+                            class="project-card-menu-trigger"
+                            type="button"
+                            aria-haspopup="menu"
+                            aria-expanded={projectMenuOpenId() === project.id}
+                            onClick={() =>
+                              setProjectMenuOpenId((current) => (current === project.id ? null : project.id))
+                            }
+                          >
+                            <span />
+                            <span />
+                            <span />
+                          </button>
+
+                          <Show when={projectMenuOpenId() === project.id}>
+                            <div class="project-card-popover" role="menu">
+                              <button
+                                class="project-card-popover-item"
+                                type="button"
+                                role="menuitem"
+                                onClick={() => openRenameModal(project)}
+                              >
+                                Rename
+                              </button>
+                              <button
+                                class="project-card-popover-item is-danger"
+                                type="button"
+                                role="menuitem"
+                                onClick={() => openDeleteModal(project)}
+                              >
+                                Delete project
+                              </button>
+                            </div>
+                          </Show>
+                        </div>
+                      </article>
+                    )}
+                  </For>
+                </div>
+              </Show>
             </Show>
           </Show>
         </Show>
