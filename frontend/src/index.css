@@ -969,10 +969,10 @@ button {
 }
 
 .project-card:not(.is-grid) .project-card-main {
-  height: 50px;
-  min-height: 50px;
+  height: 44px;
+  min-height: 44px;
   gap: 0.95rem;
-  padding: 0.42rem 2.7rem 0.42rem 0.82rem;
+  padding: 0.3rem 2.7rem 0.3rem 0.82rem;
 }
 
 .project-card:hover,
