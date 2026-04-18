@@ -2793,23 +2793,22 @@ function ProjectsMatrixBackdrop() {
       const suffix = matrixAsciiNoise[(index * 13 + snippetIndex * 2 + 1) % matrixAsciiNoise.length] ?? ";";
       return `${head}${operator}${tail}${suffix}`;
     }).join("");
-    const characters = Array.from({ length: glyphCount }, (_, characterIndex) => {
-      const toneRoll = Math.random();
+    const stream = Array.from({ length: glyphCount * 2 }, (_, characterIndex) => {
       const noiseRoll = Math.random();
       const sourceIndex = (characterIndex * 3 + index * 5) % source.length;
-
-      return {
-        value:
-          noiseRoll > 0.9
-            ? matrixAsciiNoise[Math.floor(Math.random() * matrixAsciiNoise.length)] ?? ";"
-            : source[sourceIndex] ?? "c",
-        bright: characterIndex % 7 === 0,
-        tone:
-          toneRoll > 0.82
-            ? accentTones[Math.floor(Math.random() * accentTones.length)] ?? null
-            : null,
-      };
-    });
+      const value =
+        noiseRoll > 0.92
+          ? matrixAsciiNoise[Math.floor(Math.random() * matrixAsciiNoise.length)] ?? ";"
+          : source[sourceIndex] ?? "c";
+      return characterIndex % 11 === 0 ? value.toUpperCase() : value;
+    }).join("\n");
+    const accent = accentTones[index % accentTones.length] ?? "green";
+    const gradient =
+      accent === "green"
+        ? "linear-gradient(180deg, rgba(205,255,240,0.95) 0%, rgba(130,255,184,0.9) 18%, rgba(127,220,255,0.5) 42%, rgba(127,220,255,0.16) 100%)"
+        : accent === "amber"
+          ? "linear-gradient(180deg, rgba(255,245,214,0.95) 0%, rgba(255,214,124,0.88) 18%, rgba(127,220,255,0.46) 42%, rgba(127,220,255,0.14) 100%)"
+          : "linear-gradient(180deg, rgba(244,236,255,0.95) 0%, rgba(206,174,255,0.88) 18%, rgba(127,220,255,0.46) 42%, rgba(127,220,255,0.14) 100%)";
 
     return {
       key: `matrix-column-${index}`,
@@ -2818,7 +2817,8 @@ function ProjectsMatrixBackdrop() {
       delay: `${-1 * ((index % 6) * 0.85)}s`,
       opacity: (0.12 + (index % 4) * 0.03).toFixed(2),
       fontSize: `${8 + (index % 2)}px`,
-      characters,
+      gradient,
+      stream,
     };
   });
 
@@ -2836,23 +2836,14 @@ function ProjectsMatrixBackdrop() {
               "font-size": column.fontSize,
             }}
           >
-            <div class="projects-matrix-track">
-              <For each={[...column.characters, ...column.characters]}>
-                {(character) => (
-                  <span
-                    class="projects-matrix-char"
-                    classList={{
-                      "is-bright": character.bright,
-                      "is-green": character.tone === "green",
-                      "is-amber": character.tone === "amber",
-                      "is-violet": character.tone === "violet",
-                    }}
-                  >
-                    {character.value}
-                  </span>
-                )}
-              </For>
-            </div>
+            <span
+              class="projects-matrix-track"
+              style={{
+                "--matrix-gradient": column.gradient,
+              }}
+            >
+              {column.stream}
+            </span>
           </div>
         )}
       </For>

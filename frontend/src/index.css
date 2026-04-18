@@ -809,39 +809,17 @@ button {
 }
 
 .projects-matrix-track {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1px;
-  color: rgba(127, 220, 255, 0.48);
+  display: block;
+  white-space: pre;
   font-family: "Geist Mono", ui-monospace, "SFMono-Regular", "SF Mono", monospace;
   font-weight: 500;
   line-height: 0.82;
-  text-shadow: 0 0 10px rgba(127, 220, 255, 0.12);
-}
-
-.projects-matrix-char {
-  display: block;
-}
-
-.projects-matrix-char.is-green {
-  color: rgba(130, 255, 184, 0.76);
-  text-shadow: 0 0 12px rgba(130, 255, 184, 0.2);
-}
-
-.projects-matrix-char.is-amber {
-  color: rgba(255, 214, 124, 0.74);
-  text-shadow: 0 0 12px rgba(255, 214, 124, 0.18);
-}
-
-.projects-matrix-char.is-violet {
-  color: rgba(206, 174, 255, 0.74);
-  text-shadow: 0 0 12px rgba(206, 174, 255, 0.18);
-}
-
-.projects-matrix-char.is-bright {
-  color: rgba(188, 245, 255, 0.92);
-  text-shadow: 0 0 14px rgba(127, 220, 255, 0.3);
+  background-image: var(--matrix-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 8px rgba(127, 220, 255, 0.12));
+  user-select: none;
 }
 
 @keyframes projects-matrix-fall {
