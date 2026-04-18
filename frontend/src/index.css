@@ -775,9 +775,12 @@ button {
 }
 
 .projects-matrix-bg {
-  position: absolute;
-  inset: 0 0 auto 0;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
   height: 240px;
+  width: 100vw;
   overflow: hidden;
   pointer-events: none;
   z-index: 0;
@@ -809,7 +812,7 @@ button {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.24rem;
+  gap: 3px;
   color: rgba(127, 220, 255, 0.34);
   font-family: "Geist Mono", ui-monospace, "SFMono-Regular", "SF Mono", monospace;
   font-weight: 500;
