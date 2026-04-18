@@ -1547,7 +1547,7 @@ function ProjectsTab(props: {
                     </div>
 
                     <button
-                      class="brand-button is-inverted"
+                      class="brand-button is-inverted projects-new-button"
                       type="button"
                       onClick={openCreateModal}
                       disabled={dashboard.loading}

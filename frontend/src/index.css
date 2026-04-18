@@ -644,6 +644,13 @@ button {
   line-height: 1;
 }
 
+.projects-new-button {
+  min-width: 0;
+  gap: 0.38rem;
+  padding-inline: 0.62rem;
+  font-size: 0.74rem;
+}
+
 .projects-account-menu {
   position: relative;
 }
@@ -2980,7 +2987,7 @@ button {
 }
 
 .projects-skeleton-button--new {
-  width: 9.65rem;
+  width: 8.15rem;
   height: 28px;
 }
 
