@@ -1454,6 +1454,31 @@ function ProjectsTab(props: {
                   </div>
 
                   <div class="projects-header-actions">
+                    <div class="projects-view-toggle" role="tablist" aria-label="Project layout">
+                      <button
+                        class="projects-view-button"
+                        classList={{ "is-active": viewMode() === "grid" }}
+                        type="button"
+                        role="tab"
+                        aria-selected={viewMode() === "grid"}
+                        title="Grid view"
+                        onClick={() => setViewMode("grid")}
+                      >
+                        <ViewModeIcon mode="grid" />
+                      </button>
+                      <button
+                        class="projects-view-button"
+                        classList={{ "is-active": viewMode() === "list" }}
+                        type="button"
+                        role="tab"
+                        aria-selected={viewMode() === "list"}
+                        title="List view"
+                        onClick={() => setViewMode("list")}
+                      >
+                        <ViewModeIcon mode="list" />
+                      </button>
+                    </div>
+
                     <button
                       class="brand-button is-inverted"
                       type="button"
@@ -1517,33 +1542,6 @@ function ProjectsTab(props: {
                   </div>
                 </div>
                 <div class="projects-header-rule" aria-hidden="true" />
-              </div>
-
-              <div class="projects-toolbar">
-                <div class="projects-view-toggle" role="tablist" aria-label="Project layout">
-                  <button
-                    class="projects-view-button"
-                    classList={{ "is-active": viewMode() === "grid" }}
-                    type="button"
-                    role="tab"
-                    aria-selected={viewMode() === "grid"}
-                    title="Grid view"
-                    onClick={() => setViewMode("grid")}
-                  >
-                    <ViewModeIcon mode="grid" />
-                  </button>
-                  <button
-                    class="projects-view-button"
-                    classList={{ "is-active": viewMode() === "list" }}
-                    type="button"
-                    role="tab"
-                    aria-selected={viewMode() === "list"}
-                    title="List view"
-                    onClick={() => setViewMode("list")}
-                  >
-                    <ViewModeIcon mode="list" />
-                  </button>
-                </div>
               </div>
 
               <Show
