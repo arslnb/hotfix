@@ -2749,7 +2749,8 @@ function ViewModeIcon(props: { mode: ProjectsView }) {
 }
 
 function ProjectsMatrixBackdrop() {
-  const columns = Array.from({ length: 24 }, (_, index) => {
+  const columnCount = 56;
+  const columns = Array.from({ length: columnCount }, (_, index) => {
     const glyphCount = 22 + (index % 7);
     const characters = Array.from({ length: glyphCount }, (_, characterIndex) => ({
       value: matrixGlyphs[Math.floor(Math.random() * matrixGlyphs.length)] ?? "H",
@@ -2758,11 +2759,11 @@ function ProjectsMatrixBackdrop() {
 
     return {
       key: `matrix-column-${index}`,
-      left: `${(index / 23) * 100}%`,
+      left: `${(index / (columnCount - 1)) * 100}%`,
       duration: `${7.5 + (index % 5) * 1.1}s`,
       delay: `${-1 * ((index % 6) * 0.85)}s`,
       opacity: (0.12 + (index % 4) * 0.03).toFixed(2),
-      fontSize: `${11 + (index % 3)}px`,
+      fontSize: `${9 + (index % 2)}px`,
       characters,
     };
   });
