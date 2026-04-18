@@ -871,10 +871,19 @@ button {
   display: grid;
   grid-template-columns: minmax(0, 1.6fr) 10rem minmax(8rem, 0.9fr) 2.7rem;
   align-items: center;
-  column-gap: 0.95rem;
+  column-gap: 0;
   min-height: 2rem;
   padding: 0 2.7rem 0 0.82rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.projects-table-header > * {
+  min-height: 100%;
+}
+
+.projects-table-header > *:not(:first-child) {
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  padding-left: 0.95rem;
 }
 
 .projects-table-header-button,
@@ -1116,6 +1125,7 @@ button {
   display: grid;
   grid-template-columns: minmax(0, 1.6fr) 10rem minmax(8rem, 0.9fr);
   align-items: center;
+  gap: 0;
 }
 
 .project-card:hover,
@@ -1153,11 +1163,30 @@ button {
 
 .project-card-cell {
   min-width: 0;
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.project-card-cell:not(:first-child) {
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  padding-left: 0.95rem;
 }
 
 .project-card-cell--activity {
   display: flex;
   justify-content: flex-end;
+}
+
+.project-card.is-table-row::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 2.7rem;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.06);
+  pointer-events: none;
 }
 
 .project-card.is-grid .project-card-copy {
