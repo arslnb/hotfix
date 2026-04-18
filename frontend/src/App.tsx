@@ -834,7 +834,7 @@ function ProjectsTab(props: {
     const rowHeight = 32;
     const headerHeight = 26;
     const visibleRows = Math.max(0, Math.floor((remainingHeight - headerHeight) / rowHeight));
-    const fillerCount = Math.max(0, visibleRows - sortedProjects().length);
+    const fillerCount = Math.max(0, visibleRows - sortedProjects().length - 10);
     setTableFillerRows(Math.min(fillerCount, 24));
   };
   const selectedProject = createMemo(
@@ -1470,10 +1470,6 @@ function ProjectsTab(props: {
 
   return (
     <div class="projects-shell">
-      <Show when={!openedProject()}>
-        <div class="projects-top-border" aria-hidden="true" />
-      </Show>
-
       <Show
         when={!dashboard.error}
         fallback={
@@ -1867,8 +1863,8 @@ function ProjectsTab(props: {
                                 aria-hidden="true"
                                 style={{
                                   opacity: `${Math.max(
-                                    0.1,
-                                    1 - ((index + 1) / (tableFillerRows() + 1)) * 0.92,
+                                    0,
+                                    1 - (index + 1) / Math.max(tableFillerRows(), 1),
                                   )}`,
                                 }}
                               >
