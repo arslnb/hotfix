@@ -888,6 +888,7 @@ button {
 .projects-title {
   margin: 0;
   font-size: 1.62rem;
+  line-height: 0.96;
   font-weight: 500;
   letter-spacing: -0.04em;
   color: var(--text-primary);
