@@ -1,3 +1,5 @@
+mod indexing;
+
 use std::{
     collections::{HashMap, HashSet},
     env,
@@ -14,8 +16,9 @@ use aes_gcm::{
 use async_trait::async_trait;
 use axum::{
     Json, Router,
+    body::Bytes,
     extract::{Path as AxumPath, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Redirect, Response},
     routing::{get, patch, post},
 };
@@ -24,12 +27,16 @@ use base64::{
     engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
 };
 use dotenvy::dotenv;
+use hmac::{Hmac, Mac};
+use indexing::IndexingService;
 use rand::random;
 use reqwest::header::{ACCEPT, USER_AGENT};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value as JsonValue, json};
 use sha2::{Digest, Sha256};
-use sqlx::{FromRow, PgConnection, PgPool, postgres::PgPoolOptions, types::Json as SqlJson};
+use sqlx::{
+    FromRow, PgConnection, PgPool, Postgres, postgres::PgPoolOptions, types::Json as SqlJson,
+};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tower_http::{
     services::{ServeDir, ServeFile},
@@ -57,6 +64,7 @@ struct AppState {
     config: Arc<AppConfig>,
     db: PgPool,
     http: reqwest::Client,
+    indexing: IndexingService,
 }
 
 #[derive(Clone, Debug)]
@@ -213,6 +221,8 @@ struct AppConfig {
     sentry_client_id: String,
     sentry_client_secret: String,
     frontend_dist: Option<PathBuf>,
+    snapshot_cache_dir: PathBuf,
+    github_webhook_secret: Option<String>,
 }
 
 impl AppConfig {
@@ -232,6 +242,14 @@ impl AppConfig {
                 let candidate = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../frontend/dist");
                 candidate.join("index.html").exists().then_some(candidate)
             });
+        let snapshot_cache_dir = env::var("HOTFIX_SNAPSHOT_CACHE_DIR")
+            .ok()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| env::temp_dir().join("hotfix-snapshots"));
+        let github_webhook_secret = env::var("HOTFIX_GITHUB_WEBHOOK_SECRET")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
 
         Ok(Self {
             listen_addr,
@@ -243,6 +261,8 @@ impl AppConfig {
             sentry_client_id: required_env("HOTFIX_SENTRY_CLIENT_ID")?,
             sentry_client_secret: required_env("HOTFIX_SENTRY_CLIENT_SECRET")?,
             frontend_dist,
+            snapshot_cache_dir,
+            github_webhook_secret,
         })
     }
 }
@@ -645,6 +665,14 @@ struct GitHubRepositoryPayload {
     private: bool,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitHubBranchPayload {
+    name: String,
+    commit_sha: String,
+    is_default: bool,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateHotfixProjectInput {
@@ -700,8 +728,14 @@ struct CreateProjectGraphItemInput {
     name: String,
     description: Option<String>,
     github_repo_id: i64,
+    branch: String,
     base_directory: Option<String>,
     linked_imported_sentry_project_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SearchGitHubBranchesQuery {
+    q: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -757,6 +791,8 @@ struct ProjectGraphNodeRow {
     github_repo_full_name: Option<String>,
     github_repo_url: Option<String>,
     github_repo_default_branch: Option<String>,
+    github_repo_selected_branch: Option<String>,
+    indexed_commit_sha: Option<String>,
     base_directory: Option<String>,
     indexing_status: String,
     indexing_percentage: i32,
@@ -786,6 +822,26 @@ struct ProjectGraphEdgeRow {
     label: Option<String>,
     metadata: SqlJson<JsonValue>,
     is_system: bool,
+}
+
+#[derive(Debug, FromRow)]
+struct RepoSnapshotRow {
+    id: Uuid,
+    indexed_at: Option<OffsetDateTime>,
+}
+
+#[derive(Debug, FromRow)]
+struct IndexJobRow {
+    id: Uuid,
+}
+
+#[derive(Debug, FromRow)]
+struct ProjectGraphIndexScheduleRow {
+    id: Uuid,
+    github_repo_full_name: Option<String>,
+    github_repo_url: Option<String>,
+    github_repo_default_branch: Option<String>,
+    base_directory: Option<String>,
 }
 
 #[derive(Debug, FromRow)]
@@ -1077,6 +1133,34 @@ struct GitHubRepositoryResponse {
 }
 
 #[derive(Debug, Deserialize)]
+struct GitHubBranchResponse {
+    name: String,
+    commit: GitHubBranchCommitResponse,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubBranchCommitResponse {
+    sha: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubPushWebhookPayload {
+    #[serde(rename = "ref")]
+    git_ref: String,
+    after: String,
+    deleted: Option<bool>,
+    repository: GitHubWebhookRepository,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubWebhookRepository {
+    id: i64,
+    full_name: String,
+    html_url: String,
+    default_branch: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct GitHubTokenResponse {
     access_token: String,
     scope: Option<String>,
@@ -1141,10 +1225,12 @@ async fn main() -> Result<(), AppError> {
     let http = reqwest::Client::builder()
         .user_agent(USER_AGENT_VALUE)
         .build()?;
+    let indexing = IndexingService::new(db.clone(), http.clone(), Arc::clone(&config));
     let state = AppState {
         config: Arc::clone(&config),
         db,
         http,
+        indexing,
     };
 
     let api = Router::new()
@@ -1152,6 +1238,11 @@ async fn main() -> Result<(), AppError> {
         .route("/session", get(get_session))
         .route("/dashboard", get(get_dashboard))
         .route("/github/repositories", get(list_github_repositories))
+        .route(
+            "/github/repositories/{repo_id}/branches",
+            get(list_github_repository_branches),
+        )
+        .route("/github/webhooks", post(handle_github_webhook))
         .route("/hotfix-projects", post(create_hotfix_project))
         .route(
             "/hotfix-projects/{project_id}",
@@ -1293,6 +1384,38 @@ async fn list_github_repositories(
     )?;
     let repos = fetch_all_github_repositories(&state, &access_token).await?;
     Ok(Json(repos))
+}
+
+async fn list_github_repository_branches(
+    State(state): State<AppState>,
+    session: Session,
+    AxumPath(repo_id): AxumPath<i64>,
+    Query(query): Query<SearchGitHubBranchesQuery>,
+) -> Result<Json<Vec<GitHubBranchPayload>>, AppError> {
+    let user_id = require_user_id(&session).await?;
+    let connection = load_provider_connection(&state.db, user_id, Provider::GitHub).await?;
+    let access_token = decrypt_provider_token(
+        &state.config.session_secret,
+        &connection.access_token_nonce,
+        &connection.access_token_ciphertext,
+    )?;
+    let repositories = fetch_all_github_repositories(&state, &access_token).await?;
+    let repo = repositories
+        .into_iter()
+        .find(|repo| repo.id == repo_id)
+        .ok_or_else(|| {
+            AppError::BadRequest("Select a GitHub repository connected to this account.".into())
+        })?;
+    let branches = fetch_github_repository_branches(
+        &state,
+        &access_token,
+        &repo.full_name,
+        repo.default_branch.as_deref(),
+        query.q.as_deref(),
+    )
+    .await?;
+
+    Ok(Json(branches))
 }
 
 async fn create_hotfix_project(
@@ -1609,6 +1732,12 @@ async fn create_project_graph_item(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
+    let branch = input.branch.trim();
+    if branch.is_empty() {
+        return Err(AppError::BadRequest(
+            "Select a branch before adding this item.".into(),
+        ));
+    }
     let base_directory = input
         .base_directory
         .as_deref()
@@ -1629,6 +1758,13 @@ async fn create_project_graph_item(
         .ok_or_else(|| {
             AppError::BadRequest("Select a GitHub repository connected to this account.".into())
         })?;
+    let selected_branch = fetch_github_repository_branch(
+        &state,
+        &github_access_token,
+        &github_repo.full_name,
+        branch,
+    )
+    .await?;
 
     if let Some(imported_project_id) = input.linked_imported_sentry_project_id {
         let owner_project_id =
@@ -1655,6 +1791,7 @@ async fn create_project_graph_item(
 
     let node_id = Uuid::new_v4();
     let node_key = format!("project-item:{node_id}");
+    let mut tx = state.db.begin().await?;
 
     sqlx::query(
         r#"
@@ -1673,6 +1810,8 @@ async fn create_project_graph_item(
             github_repo_full_name,
             github_repo_url,
             github_repo_default_branch,
+            github_repo_selected_branch,
+            indexed_commit_sha,
             base_directory,
             indexing_status,
             indexing_percentage,
@@ -1680,7 +1819,7 @@ async fn create_project_graph_item(
             is_system
         )
         values (
-            $1, $2, $3, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'pending', 0, '{}'::jsonb, false
+            $1, $2, $3, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'queued', 0, '{}'::jsonb, false
         )
         "#,
     )
@@ -1697,12 +1836,296 @@ async fn create_project_graph_item(
     .bind(&github_repo.full_name)
     .bind(&github_repo.html_url)
     .bind(&github_repo.default_branch)
-    .bind(base_directory)
-    .execute(&state.db)
+    .bind(&selected_branch.name)
+    .bind(&selected_branch.commit_sha)
+    .bind(&base_directory)
+    .execute(&mut *tx)
     .await?;
+
+    let maybe_job_id = schedule_snapshot_for_node(
+        &mut tx,
+        node_id,
+        &github_repo,
+        &selected_branch,
+        base_directory.as_deref(),
+    )
+    .await?;
+    tx.commit().await?;
+
+    if let Some(job_id) = maybe_job_id {
+        state.indexing.enqueue(job_id).await?;
+    }
 
     let payload = build_project_graph_payload(&state.db, project_id).await?;
     Ok(Json(payload))
+}
+
+async fn schedule_snapshot_for_node(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    node_id: Uuid,
+    github_repo: &GitHubRepositoryPayload,
+    branch: &GitHubBranchPayload,
+    base_directory: Option<&str>,
+) -> Result<Option<Uuid>, AppError> {
+    let normalized_base_directory = base_directory.unwrap_or_default();
+    let artifact_key = build_snapshot_artifact_key(github_repo.id, &branch.commit_sha);
+    let snapshot = sqlx::query_as::<_, RepoSnapshotRow>(
+        r#"
+        insert into repo_snapshots (
+            id,
+            github_repo_id,
+            github_repo_full_name,
+            github_repo_url,
+            github_repo_default_branch,
+            github_repo_selected_branch,
+            commit_sha,
+            base_directory,
+            snapshot_artifact_key
+        )
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        on conflict (github_repo_id, github_repo_selected_branch, commit_sha, base_directory) do update
+        set github_repo_full_name = excluded.github_repo_full_name,
+            github_repo_url = excluded.github_repo_url,
+            github_repo_default_branch = excluded.github_repo_default_branch,
+            snapshot_artifact_key = excluded.snapshot_artifact_key,
+            updated_at = now()
+        returning id, indexed_at
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(github_repo.id)
+    .bind(&github_repo.full_name)
+    .bind(&github_repo.html_url)
+    .bind(&github_repo.default_branch)
+    .bind(&branch.name)
+    .bind(&branch.commit_sha)
+    .bind(normalized_base_directory)
+    .bind(&artifact_key)
+    .fetch_one(&mut **tx)
+    .await?;
+
+    if snapshot.indexed_at.is_some() {
+        sqlx::query(
+            r#"
+            update hotfix_project_graph_nodes
+            set indexing_status = 'indexed',
+                indexing_percentage = 100,
+                github_repo_selected_branch = $2,
+                indexed_commit_sha = $3,
+                updated_at = now()
+            where id = $1
+            "#,
+        )
+        .bind(node_id)
+        .bind(&branch.name)
+        .bind(&branch.commit_sha)
+        .execute(&mut **tx)
+        .await?;
+
+        sqlx::query(
+            r#"
+            insert into index_jobs (
+                id,
+                repo_snapshot_id,
+                hotfix_project_graph_node_id,
+                status,
+                progress_percentage,
+                finished_at
+            )
+            values ($1, $2, $3, 'completed', 100, now())
+            on conflict (hotfix_project_graph_node_id, repo_snapshot_id) do update
+            set status = 'completed',
+                progress_percentage = 100,
+                finished_at = coalesce(index_jobs.finished_at, now()),
+                error_summary = null,
+                updated_at = now()
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(snapshot.id)
+        .bind(node_id)
+        .execute(&mut **tx)
+        .await?;
+
+        return Ok(None);
+    }
+
+    sqlx::query(
+        r#"
+        update hotfix_project_graph_nodes
+        set indexing_status = 'queued',
+            indexing_percentage = 0,
+            github_repo_selected_branch = $2,
+            indexed_commit_sha = $3,
+            updated_at = now()
+        where id = $1
+        "#,
+    )
+    .bind(node_id)
+    .bind(&branch.name)
+    .bind(&branch.commit_sha)
+    .execute(&mut **tx)
+    .await?;
+
+    let job = sqlx::query_as::<_, IndexJobRow>(
+        r#"
+        insert into index_jobs (
+            id,
+            repo_snapshot_id,
+            hotfix_project_graph_node_id,
+            status,
+            progress_percentage,
+            error_summary,
+            started_at,
+            finished_at
+        )
+        values ($1, $2, $3, 'queued', 0, null, null, null)
+        on conflict (hotfix_project_graph_node_id, repo_snapshot_id) do update
+        set status = 'queued',
+            progress_percentage = 0,
+            error_summary = null,
+            started_at = null,
+            finished_at = null,
+            updated_at = now()
+        returning id
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(snapshot.id)
+    .bind(node_id)
+    .fetch_one(&mut **tx)
+    .await?;
+
+    Ok(Some(job.id))
+}
+
+fn build_snapshot_artifact_key(github_repo_id: i64, commit_sha: &str) -> String {
+    format!("github/{github_repo_id}/{commit_sha}.zip")
+}
+
+async fn handle_github_webhook(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<StatusCode, AppError> {
+    let secret = state
+        .config
+        .github_webhook_secret
+        .as_deref()
+        .ok_or_else(|| AppError::Config("GitHub webhooks are not configured.".into()))?;
+    let signature = headers
+        .get("X-Hub-Signature-256")
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| AppError::Auth("Missing GitHub webhook signature.".into()))?;
+
+    if !verify_github_webhook_signature(secret, signature, &body)? {
+        return Err(AppError::Auth(
+            "GitHub webhook signature verification failed.".into(),
+        ));
+    }
+
+    let event = headers
+        .get("X-GitHub-Event")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+
+    if event == "ping" || event.is_empty() {
+        return Ok(StatusCode::ACCEPTED);
+    }
+    if event != "push" {
+        return Ok(StatusCode::ACCEPTED);
+    }
+
+    let payload = serde_json::from_slice::<GitHubPushWebhookPayload>(&body)
+        .map_err(|_| AppError::BadRequest("The GitHub webhook payload was invalid.".into()))?;
+    if payload.deleted.unwrap_or(false) || payload.after.chars().all(|character| character == '0') {
+        return Ok(StatusCode::ACCEPTED);
+    }
+    let Some(branch_name) = payload.git_ref.strip_prefix("refs/heads/") else {
+        return Ok(StatusCode::ACCEPTED);
+    };
+
+    let matching_nodes = sqlx::query_as::<_, ProjectGraphIndexScheduleRow>(
+        r#"
+        select
+            id,
+            github_repo_full_name,
+            github_repo_url,
+            github_repo_default_branch,
+            base_directory
+        from hotfix_project_graph_nodes
+        where github_repo_id = $1
+          and github_repo_selected_branch = $2
+          and is_system = false
+        "#,
+    )
+    .bind(payload.repository.id)
+    .bind(branch_name)
+    .fetch_all(&state.db)
+    .await?;
+
+    let branch = GitHubBranchPayload {
+        name: branch_name.to_string(),
+        commit_sha: payload.after.clone(),
+        is_default: payload.repository.default_branch.as_deref() == Some(branch_name),
+    };
+    let mut enqueued_jobs = Vec::new();
+
+    for node in matching_nodes {
+        let repo = GitHubRepositoryPayload {
+            id: payload.repository.id,
+            full_name: node
+                .github_repo_full_name
+                .clone()
+                .unwrap_or_else(|| payload.repository.full_name.clone()),
+            html_url: node
+                .github_repo_url
+                .clone()
+                .unwrap_or_else(|| payload.repository.html_url.clone()),
+            default_branch: node
+                .github_repo_default_branch
+                .clone()
+                .or_else(|| payload.repository.default_branch.clone()),
+            private: true,
+        };
+
+        let mut tx = state.db.begin().await?;
+        let job_id = schedule_snapshot_for_node(
+            &mut tx,
+            node.id,
+            &repo,
+            &branch,
+            node.base_directory.as_deref(),
+        )
+        .await?;
+        tx.commit().await?;
+
+        if let Some(job_id) = job_id {
+            enqueued_jobs.push(job_id);
+        }
+    }
+
+    for job_id in enqueued_jobs {
+        state.indexing.enqueue(job_id).await?;
+    }
+
+    Ok(StatusCode::ACCEPTED)
+}
+
+fn verify_github_webhook_signature(
+    secret: &str,
+    signature_header: &str,
+    body: &[u8],
+) -> Result<bool, AppError> {
+    let Some(signature) = signature_header.strip_prefix("sha256=") else {
+        return Ok(false);
+    };
+    let signature = hex::decode(signature)
+        .map_err(|_| AppError::Auth("The GitHub webhook signature was malformed.".into()))?;
+    let mut mac =
+        <Hmac<Sha256> as Mac>::new_from_slice(secret.as_bytes()).map_err(|_| AppError::Internal)?;
+    mac.update(body);
+    Ok(mac.verify_slice(&signature).is_ok())
 }
 
 async fn get_hotfix_project_incidents(
@@ -3110,6 +3533,8 @@ async fn build_project_graph_payload(
             hotfix_project_graph_nodes.github_repo_full_name,
             hotfix_project_graph_nodes.github_repo_url,
             hotfix_project_graph_nodes.github_repo_default_branch,
+            hotfix_project_graph_nodes.github_repo_selected_branch,
+            hotfix_project_graph_nodes.indexed_commit_sha,
             hotfix_project_graph_nodes.base_directory,
             hotfix_project_graph_nodes.indexing_status,
             hotfix_project_graph_nodes.indexing_percentage,
@@ -3182,6 +3607,12 @@ async fn build_project_graph_payload(
                 }
                 if let Some(default_branch) = row.github_repo_default_branch.clone() {
                     metadata["githubRepoDefaultBranch"] = json!(default_branch);
+                }
+                if let Some(selected_branch) = row.github_repo_selected_branch.clone() {
+                    metadata["githubRepoSelectedBranch"] = json!(selected_branch);
+                }
+                if let Some(indexed_commit_sha) = row.indexed_commit_sha.clone() {
+                    metadata["indexedCommitSha"] = json!(indexed_commit_sha);
                 }
                 if let Some(base_directory) = row.base_directory.clone() {
                     metadata["baseDirectory"] = json!(base_directory);
@@ -3498,6 +3929,161 @@ async fn fetch_all_github_repositories(
     }
 
     Ok(all_repos)
+}
+
+async fn fetch_github_repository_branches(
+    state: &AppState,
+    access_token: &str,
+    repo_full_name: &str,
+    default_branch: Option<&str>,
+    query: Option<&str>,
+) -> Result<Vec<GitHubBranchPayload>, AppError> {
+    let mut branches = Vec::new();
+    let normalized_query = query
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_lowercase());
+
+    if let Some(default_branch_name) = default_branch {
+        let branch = fetch_github_repository_branch(
+            state,
+            access_token,
+            repo_full_name,
+            default_branch_name,
+        )
+        .await?;
+        if normalized_query
+            .as_deref()
+            .map(|value| branch.name.to_ascii_lowercase().contains(value))
+            .unwrap_or(true)
+        {
+            branches.push(GitHubBranchPayload {
+                is_default: true,
+                ..branch
+            });
+        }
+    }
+
+    let mut page = 1;
+    while branches.len() < 100 {
+        let mut url = build_github_repository_url(repo_full_name, &["branches"])?;
+        {
+            let mut query_pairs = url.query_pairs_mut();
+            query_pairs.append_pair("per_page", "100");
+            query_pairs.append_pair("page", &page.to_string());
+        }
+
+        let response = state
+            .http
+            .get(url)
+            .header(ACCEPT, "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .bearer_auth(access_token)
+            .send()
+            .await?;
+        if !response.status().is_success() {
+            let body = response.text().await.unwrap_or_default();
+            warn!(body, repo_full_name, "github branch lookup failed");
+            return Err(AppError::BadRequest(
+                "GitHub branch access is unavailable. Reconnect GitHub.".into(),
+            ));
+        }
+
+        let page_branches = response.json::<Vec<GitHubBranchResponse>>().await?;
+        if page_branches.is_empty() {
+            break;
+        }
+
+        for branch in page_branches {
+            if branches.iter().any(|existing| existing.name == branch.name) {
+                continue;
+            }
+            if normalized_query
+                .as_deref()
+                .map(|value| branch.name.to_ascii_lowercase().contains(value))
+                .unwrap_or(true)
+            {
+                let branch_name = branch.name;
+                branches.push(GitHubBranchPayload {
+                    is_default: default_branch.is_some_and(|value| value == branch_name),
+                    name: branch_name,
+                    commit_sha: branch.commit.sha,
+                });
+            }
+        }
+
+        page += 1;
+    }
+
+    branches.sort_by(|left, right| {
+        right
+            .is_default
+            .cmp(&left.is_default)
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    branches.truncate(100);
+    Ok(branches)
+}
+
+async fn fetch_github_repository_branch(
+    state: &AppState,
+    access_token: &str,
+    repo_full_name: &str,
+    branch_name: &str,
+) -> Result<GitHubBranchPayload, AppError> {
+    let url = build_github_repository_url(repo_full_name, &["branches", branch_name])?;
+    let response = state
+        .http
+        .get(url)
+        .header(ACCEPT, "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .bearer_auth(access_token)
+        .send()
+        .await?;
+
+    if response.status() == StatusCode::NOT_FOUND {
+        return Err(AppError::BadRequest(
+            "Select a branch that still exists on the connected repository.".into(),
+        ));
+    }
+
+    if !response.status().is_success() {
+        let body = response.text().await.unwrap_or_default();
+        warn!(
+            body,
+            repo_full_name, branch_name, "github branch detail lookup failed"
+        );
+        return Err(AppError::BadRequest(
+            "GitHub branch access is unavailable. Reconnect GitHub.".into(),
+        ));
+    }
+
+    let branch = response.json::<GitHubBranchResponse>().await?;
+    Ok(GitHubBranchPayload {
+        name: branch.name,
+        commit_sha: branch.commit.sha,
+        is_default: false,
+    })
+}
+
+fn build_github_repository_url(
+    repo_full_name: &str,
+    suffix_segments: &[&str],
+) -> Result<Url, AppError> {
+    let (owner, repo) = repo_full_name
+        .split_once('/')
+        .ok_or_else(|| AppError::BadRequest("The GitHub repository name is invalid.".into()))?;
+    let mut url = Url::parse("https://api.github.com").map_err(|_| AppError::Internal)?;
+    {
+        let mut segments = url.path_segments_mut().map_err(|_| AppError::Internal)?;
+        segments.push("repos");
+        segments.push(owner);
+        segments.push(repo);
+        for segment in suffix_segments {
+            segments.push(segment);
+        }
+    }
+    Ok(url)
 }
 
 async fn fetch_all_sentry_projects(

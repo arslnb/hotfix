@@ -15,8 +15,10 @@ const githubIcon = new URL("./assets/github.svg", import.meta.url).href;
 const sidebarHomeIcon = new URL("./assets/sidebar/icons8-home-50.svg", import.meta.url).href;
 const sidebarLogsIcon = new URL("./assets/sidebar/icons8-rfid-signal-50.svg", import.meta.url).href;
 const sidebarIncidentsIcon = new URL("./assets/sidebar/icons8-insect-50.svg", import.meta.url).href;
-const sidebarPerformanceIcon = new URL("./assets/sidebar/icons8-speed-50.svg", import.meta.url).href;
-const sidebarSettingsIcon = new URL("./assets/sidebar/icons8-settings-50.svg", import.meta.url).href;
+const sidebarPerformanceIcon = new URL("./assets/sidebar/icons8-speed-50.svg", import.meta.url)
+  .href;
+const sidebarSettingsIcon = new URL("./assets/sidebar/icons8-settings-50.svg", import.meta.url)
+  .href;
 const brandText = "Hotfix";
 const glyphVariants: Record<string, string[]> = {
   H: ["H", "#", "4"],
@@ -441,7 +443,10 @@ function TermsPage() {
   return (
     <article class="space-y-8 rounded-[4px] bg-[var(--surface)] px-6 py-6 text-[0.94rem] leading-7 text-[var(--text-secondary)] sm:px-8">
       <div class="space-y-3">
-        <a class="inline-flex items-center text-[0.75rem] uppercase tracking-[0.24em] text-[var(--text-muted)] transition-colors hover:text-[var(--text-secondary)]" href="/">
+        <a
+          class="inline-flex items-center text-[0.75rem] uppercase tracking-[0.24em] text-[var(--text-muted)] transition-colors hover:text-[var(--text-secondary)]"
+          href="/"
+        >
           Back
         </a>
         <div class="space-y-2">
@@ -487,7 +492,10 @@ function PrivacyPage() {
   return (
     <article class="space-y-8 rounded-[4px] bg-[var(--surface)] px-6 py-6 text-[0.94rem] leading-7 text-[var(--text-secondary)] sm:px-8">
       <div class="space-y-3">
-        <a class="inline-flex items-center text-[0.75rem] uppercase tracking-[0.24em] text-[var(--text-muted)] transition-colors hover:text-[var(--text-secondary)]" href="/">
+        <a
+          class="inline-flex items-center text-[0.75rem] uppercase tracking-[0.24em] text-[var(--text-muted)] transition-colors hover:text-[var(--text-secondary)]"
+          href="/"
+        >
           Back
         </a>
         <div class="space-y-2">
@@ -742,11 +750,16 @@ function ProjectsTab(props: {
   const [openedProjectId, setOpenedProjectId] = createSignal<string | null>(null);
   const [navigatingToProjectList, setNavigatingToProjectList] = createSignal(false);
   const [routeProject, setRouteProject] = createSignal<ProjectRouteState>(
-    typeof window === "undefined" ? { slug: null, section: "home" } : getProjectRoute(window.location.pathname),
+    typeof window === "undefined"
+      ? { slug: null, section: "home" }
+      : getProjectRoute(window.location.pathname),
   );
   const [createError, setCreateError] = createSignal<string | null>(null);
   const [creating, setCreating] = createSignal(false);
-  const [dashboard, { refetch, mutate }] = createResource(() => "dashboard", async () => fetchDashboard());
+  const [dashboard, { refetch, mutate }] = createResource(
+    () => "dashboard",
+    async () => fetchDashboard(),
+  );
 
   const sentryOrganizations = createMemo(() => dashboard()?.sentryOrganizations ?? []);
   const canCreateProject = createMemo(() => projectName().trim().length > 0 && !creating());
@@ -754,21 +767,24 @@ function ProjectsTab(props: {
     const projects = [...(dashboard()?.projects ?? [])];
 
     if (sortBy() === "alphabetical") {
-      projects.sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+      projects.sort((left, right) =>
+        left.name.localeCompare(right.name, undefined, { sensitivity: "base" }),
+      );
       return projects;
     }
 
     projects.sort(
       (left, right) =>
-        getProjectCreatedAtTimestamp(right.createdAt) - getProjectCreatedAtTimestamp(left.createdAt),
+        getProjectCreatedAtTimestamp(right.createdAt) -
+        getProjectCreatedAtTimestamp(left.createdAt),
     );
     return projects;
   });
-  const selectedProject = createMemo(() =>
-    sortedProjects().find((project) => project.id === selectedProjectId()) ?? null,
+  const selectedProject = createMemo(
+    () => sortedProjects().find((project) => project.id === selectedProjectId()) ?? null,
   );
-  const openedProject = createMemo(() =>
-    sortedProjects().find((project) => project.id === openedProjectId()) ?? null,
+  const openedProject = createMemo(
+    () => sortedProjects().find((project) => project.id === openedProjectId()) ?? null,
   );
   const renameModalProject = createMemo(
     () => sortedProjects().find((project) => project.id === renameModalProjectId()) ?? null,
@@ -987,7 +1003,8 @@ function ProjectsTab(props: {
       const target = event.target;
       if (
         target instanceof HTMLElement &&
-        (target.closest("[data-projects-account-menu]") || target.closest("[data-project-action-menu]"))
+        (target.closest("[data-projects-account-menu]") ||
+          target.closest("[data-project-action-menu]"))
       ) {
         return;
       }
@@ -997,7 +1014,12 @@ function ProjectsTab(props: {
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (createModalOpen() || settingsModalOpen() || renameModalProjectId() || deleteModalProjectId()) {
+      if (
+        createModalOpen() ||
+        settingsModalOpen() ||
+        renameModalProjectId() ||
+        deleteModalProjectId()
+      ) {
         return;
       }
 
@@ -1530,7 +1552,14 @@ function ProjectsTab(props: {
                   <div class="projects-empty-state">
                     <div class="projects-empty-illustration" aria-hidden="true">
                       <svg viewBox="0 0 80 80" fill="none">
-                        <rect x="18" y="16" width="44" height="48" rx="4" fill="rgba(255,255,255,0.03)" />
+                        <rect
+                          x="18"
+                          y="16"
+                          width="44"
+                          height="48"
+                          rx="4"
+                          fill="rgba(255,255,255,0.03)"
+                        />
                         <path
                           d="M29 27h22M29 35h16"
                           stroke="rgba(242,238,227,0.34)"
@@ -1553,7 +1582,14 @@ function ProjectsTab(props: {
                           stroke-linejoin="round"
                         />
                         <defs>
-                          <linearGradient id="empty-graph-stroke" x1="24" y1="54" x2="55" y2="18" gradientUnits="userSpaceOnUse">
+                          <linearGradient
+                            id="empty-graph-stroke"
+                            x1="24"
+                            y1="54"
+                            x2="55"
+                            y2="18"
+                            gradientUnits="userSpaceOnUse"
+                          >
                             <stop stop-color="rgba(70,136,220,0.78)" />
                             <stop offset="0.56" stop-color="rgba(127,220,255,0.9)" />
                             <stop offset="1" stop-color="#a4f0ff" />
@@ -1563,8 +1599,8 @@ function ProjectsTab(props: {
                     </div>
                     <p class="projects-empty-title">No projects yet</p>
                     <p class="projects-empty-copy">
-                      Create a blank project, then add repo-backed items to the canvas and optionally
-                      attach specific Sentry projects later.
+                      Create a blank project, then add repo-backed items to the canvas and
+                      optionally attach specific Sentry projects later.
                     </p>
                   </div>
                 }
@@ -1616,12 +1652,17 @@ function ProjectsTab(props: {
                                 </div>
 
                                 <div class="project-card-cell project-card-cell--created">
-                                  <p class="project-card-meta">{formatProjectDate(project.createdAt)}</p>
+                                  <p class="project-card-meta">
+                                    {formatProjectDate(project.createdAt)}
+                                  </p>
                                 </div>
 
                                 <div class="project-card-cell project-card-cell--activity">
                                   <div class="project-card-stats is-inline">
-                                    <ProjectSparkline seed={`${project.id}:${project.name}`} compact={true} />
+                                    <ProjectSparkline
+                                      seed={`${project.id}:${project.name}`}
+                                      compact={true}
+                                    />
                                   </div>
                                 </div>
                               </button>
@@ -1633,7 +1674,9 @@ function ProjectsTab(props: {
                                   aria-haspopup="menu"
                                   aria-expanded={projectMenuOpenId() === project.id}
                                   onClick={() =>
-                                    setProjectMenuOpenId((current) => (current === project.id ? null : project.id))
+                                    setProjectMenuOpenId((current) =>
+                                      current === project.id ? null : project.id,
+                                    )
                                   }
                                 >
                                   <span />
@@ -1688,11 +1731,16 @@ function ProjectsTab(props: {
                           >
                             <div class="project-card-copy">
                               <h2 class="project-card-title">{project.name}</h2>
-                              <p class="project-card-meta">{formatProjectDate(project.createdAt)}</p>
+                              <p class="project-card-meta">
+                                {formatProjectDate(project.createdAt)}
+                              </p>
                             </div>
 
                             <div class="project-card-stats">
-                              <ProjectSparkline seed={`${project.id}:${project.name}`} compact={false} />
+                              <ProjectSparkline
+                                seed={`${project.id}:${project.name}`}
+                                compact={false}
+                              />
                             </div>
                           </button>
 
@@ -1703,7 +1751,9 @@ function ProjectsTab(props: {
                               aria-haspopup="menu"
                               aria-expanded={projectMenuOpenId() === project.id}
                               onClick={() =>
-                                setProjectMenuOpenId((current) => (current === project.id ? null : project.id))
+                                setProjectMenuOpenId((current) =>
+                                  current === project.id ? null : project.id,
+                                )
                               }
                             >
                               <span />
@@ -1758,7 +1808,12 @@ function ProjectsTab(props: {
                   Make a new project
                 </h2>
               </div>
-              <button class="project-modal-close" type="button" onClick={closeCreateModal} aria-label="Close">
+              <button
+                class="project-modal-close"
+                type="button"
+                onClick={closeCreateModal}
+                aria-label="Close"
+              >
                 <span aria-hidden="true">×</span>
               </button>
             </div>
@@ -1794,11 +1849,7 @@ function ProjectsTab(props: {
                 <button class="project-modal-secondary" type="button" onClick={closeCreateModal}>
                   Cancel
                 </button>
-                <button
-                  class="brand-button"
-                  type="submit"
-                  disabled={!canCreateProject()}
-                >
+                <button class="brand-button" type="submit" disabled={!canCreateProject()}>
                   {creating() ? "Creating..." : "Create project"}
                 </button>
               </div>
@@ -1809,7 +1860,11 @@ function ProjectsTab(props: {
 
       <Show when={renameModalProject()}>
         {(project) => (
-          <div class="project-modal-backdrop" role="presentation" onClick={() => closeRenameModal()}>
+          <div
+            class="project-modal-backdrop"
+            role="presentation"
+            onClick={() => closeRenameModal()}
+          >
             <div
               class="project-modal"
               role="dialog"
@@ -1823,7 +1878,12 @@ function ProjectsTab(props: {
                     Rename project
                   </h2>
                 </div>
-                <button class="project-modal-close" type="button" onClick={closeRenameModal} aria-label="Close">
+                <button
+                  class="project-modal-close"
+                  type="button"
+                  onClick={closeRenameModal}
+                  aria-label="Close"
+                >
                   <span aria-hidden="true">×</span>
                 </button>
               </div>
@@ -1862,7 +1922,11 @@ function ProjectsTab(props: {
 
       <Show when={deleteModalProject()}>
         {(project) => (
-          <div class="project-modal-backdrop" role="presentation" onClick={() => closeDeleteModal()}>
+          <div
+            class="project-modal-backdrop"
+            role="presentation"
+            onClick={() => closeDeleteModal()}
+          >
             <div
               class="project-modal"
               role="dialog"
@@ -1876,7 +1940,12 @@ function ProjectsTab(props: {
                     Delete project
                   </h2>
                 </div>
-                <button class="project-modal-close" type="button" onClick={closeDeleteModal} aria-label="Close">
+                <button
+                  class="project-modal-close"
+                  type="button"
+                  onClick={closeDeleteModal}
+                  aria-label="Close"
+                >
                   <span aria-hidden="true">×</span>
                 </button>
               </div>
@@ -1908,7 +1977,11 @@ function ProjectsTab(props: {
                   <button class="project-modal-secondary" type="button" onClick={closeDeleteModal}>
                     Cancel
                   </button>
-                  <button class="brand-button brand-button-danger" type="submit" disabled={!canConfirmDelete()}>
+                  <button
+                    class="brand-button brand-button-danger"
+                    type="submit"
+                    disabled={!canConfirmDelete()}
+                  >
                     {deleting() ? "Deleting..." : "Delete project"}
                   </button>
                 </div>
@@ -1939,11 +2012,17 @@ function ProjectWorkspace(props: {
   onAssignSentryConnection: (projectId: string, connectionId: string) => Promise<HotfixProject>;
   onRefreshSentryProjects: (projectId: string) => Promise<HotfixProject>;
   onRename: (projectId: string, nextName: string) => Promise<void>;
-  onUpdateSentryProjectSelection: (projectId: string, includedProjectIds: string[]) => Promise<void>;
+  onUpdateSentryProjectSelection: (
+    projectId: string,
+    includedProjectIds: string[],
+  ) => Promise<void>;
 }) {
   const [editingName, setEditingName] = createSignal(false);
   const [draftName, setDraftName] = createSignal(props.project.name);
-  const [headerLoadingState, setHeaderLoadingState] = createSignal<{ active: boolean; label: string }>({
+  const [headerLoadingState, setHeaderLoadingState] = createSignal<{
+    active: boolean;
+    label: string;
+  }>({
     active: false,
     label: "",
   });
@@ -1995,7 +2074,10 @@ function ProjectWorkspace(props: {
 
   return (
     <div class="project-workspace">
-      <div class="project-page-header-shell" classList={{ "is-loading": headerLoadingState().active }}>
+      <div
+        class="project-page-header-shell"
+        classList={{ "is-loading": headerLoadingState().active }}
+      >
         <header class="project-page-header">
           <div class="project-page-header-side">
             <button class="project-workspace-back" type="button" onClick={props.onBack}>
@@ -2048,7 +2130,10 @@ function ProjectWorkspace(props: {
           </div>
 
           <div class="project-page-header-side project-page-header-side--right">
-            <Show when={!savingName()} fallback={<span class="project-page-header-meta">Saving...</span>}>
+            <Show
+              when={!savingName()}
+              fallback={<span class="project-page-header-meta">Saving...</span>}
+            >
               <ProjectHeaderClocks />
             </Show>
           </div>
@@ -2102,7 +2187,10 @@ function ProjectSectionContent(props: {
   onHeaderLoadingChange: (active: boolean, label: string) => void;
   onAssignSentryConnection: (projectId: string, connectionId: string) => Promise<HotfixProject>;
   onRefreshSentryProjects: (projectId: string) => Promise<HotfixProject>;
-  onUpdateSentryProjectSelection: (projectId: string, includedProjectIds: string[]) => Promise<void>;
+  onUpdateSentryProjectSelection: (
+    projectId: string,
+    includedProjectIds: string[],
+  ) => Promise<void>;
 }) {
   const title = createMemo(() => {
     switch (props.activeSection) {
@@ -2155,9 +2243,18 @@ function ProjectSectionContent(props: {
         />
       </Show>
       <Show when={props.activeSection === "incidents"}>
-        <ProjectIncidentsSection project={props.project} onHeaderLoadingChange={props.onHeaderLoadingChange} />
+        <ProjectIncidentsSection
+          project={props.project}
+          onHeaderLoadingChange={props.onHeaderLoadingChange}
+        />
       </Show>
-      <Show when={props.activeSection !== "home" && props.activeSection !== "settings" && props.activeSection !== "incidents"}>
+      <Show
+        when={
+          props.activeSection !== "home" &&
+          props.activeSection !== "settings" &&
+          props.activeSection !== "incidents"
+        }
+      >
         <div class="project-workspace-grid">
           <div class="logged-in-card">
             <p class="logged-in-card-label">{title().eyebrow}</p>
@@ -2226,7 +2323,8 @@ function ProjectIncidentsSection(props: {
       const payload = await backfillHotfixIncidents(props.project.id);
       mutate(payload);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not backfill incidents from Sentry.";
+      const message =
+        error instanceof Error ? error.message : "Could not backfill incidents from Sentry.";
       setSyncError(message);
     } finally {
       setSyncing(false);
@@ -2244,15 +2342,25 @@ function ProjectIncidentsSection(props: {
         <div>
           <p class="project-incidents-title">Hotfix incidents</p>
           <p class="project-incidents-copy">
-            Hotfix groups linked Sentry issues into local incidents so this view can stay DB-backed after the
-            initial backfill.
+            Hotfix groups linked Sentry issues into local incidents so this view can stay DB-backed
+            after the initial backfill.
           </p>
         </div>
         <div class="project-incidents-actions">
-          <button class="project-secondary-button" type="button" onClick={() => void refetch()} disabled={incidents.loading || syncing()}>
+          <button
+            class="project-secondary-button"
+            type="button"
+            onClick={() => void refetch()}
+            disabled={incidents.loading || syncing()}
+          >
             Refresh list
           </button>
-          <button class="brand-button" type="button" onClick={() => void handleBackfill()} disabled={syncing()}>
+          <button
+            class="brand-button"
+            type="button"
+            onClick={() => void handleBackfill()}
+            disabled={syncing()}
+          >
             {syncing() ? "Backfilling..." : "Backfill from Sentry"}
           </button>
         </div>
@@ -2268,7 +2376,9 @@ function ProjectIncidentsSection(props: {
           <div class="logged-in-card">
             <p class="logged-in-card-label">Incidents</p>
             <h3 class="logged-in-card-title">Incident data is unavailable</h3>
-            <p class="logged-in-card-copy">Hotfix could not load the local incident projection for this project.</p>
+            <p class="logged-in-card-copy">
+              Hotfix could not load the local incident projection for this project.
+            </p>
           </div>
         }
       >
@@ -2288,8 +2398,8 @@ function ProjectIncidentsSection(props: {
                 <p class="logged-in-card-label">No incidents yet</p>
                 <h3 class="logged-in-card-title">Run the first Sentry backfill</h3>
                 <p class="logged-in-card-copy">
-                  Hotfix will import unresolved Sentry issues, create local issue snapshots, and group them into
-                  project incidents.
+                  Hotfix will import unresolved Sentry issues, create local issue snapshots, and
+                  group them into project incidents.
                 </p>
               </div>
             }
@@ -2303,13 +2413,17 @@ function ProjectIncidentsSection(props: {
                         <div class="project-incident-meta-row">
                           <span class="project-incident-status">{incident.status}</span>
                           <span class="project-incident-meta">
-                            {incident.issueCount} issue{incident.issueCount === 1 ? "" : "s"} · {incident.sentryProjectCount} project
+                            {incident.issueCount} issue{incident.issueCount === 1 ? "" : "s"} ·{" "}
+                            {incident.sentryProjectCount} project
                             {incident.sentryProjectCount === 1 ? "" : "s"}
                           </span>
                         </div>
                         <h3 class="project-incident-title">{incident.title}</h3>
                         <p class="project-incident-meta">
-                          Last seen {formatProjectDate(incident.lastSeenAt ?? incident.firstSeenAt ?? Date.now())}
+                          Last seen{" "}
+                          {formatProjectDate(
+                            incident.lastSeenAt ?? incident.firstSeenAt ?? Date.now(),
+                          )}
                         </p>
                       </div>
                     </div>
@@ -2341,24 +2455,30 @@ function ProjectIncidentsSection(props: {
                             {(codeRef) => (
                               <div class="project-incident-code-item">
                                 <p class="project-incident-code-path">
-                                  {codeRef.githubRepoFullName ? `${codeRef.githubRepoFullName} · ` : ""}
+                                  {codeRef.githubRepoFullName
+                                    ? `${codeRef.githubRepoFullName} · `
+                                    : ""}
                                   {codeRef.path}
                                   <Show when={codeRef.startLine}>
                                     <span>
                                       :{codeRef.startLine}
-                                      {codeRef.endLine && codeRef.endLine !== codeRef.startLine ? `-${codeRef.endLine}` : ""}
+                                      {codeRef.endLine && codeRef.endLine !== codeRef.startLine
+                                        ? `-${codeRef.endLine}`
+                                        : ""}
                                     </span>
                                   </Show>
                                 </p>
                                 <p class="project-incident-code-meta">
-                                  {codeRef.symbol ?? codeRef.source} · confidence {Math.round(codeRef.confidence * 100)}%
+                                  {codeRef.symbol ?? codeRef.source} · confidence{" "}
+                                  {Math.round(codeRef.confidence * 100)}%
                                 </p>
                               </div>
                             )}
                           </For>
                           <Show when={incident.codeRefs.length === 0}>
                             <p class="project-incident-empty-copy">
-                              No code references derived yet. The next pass can enrich these from exemplar stack frames.
+                              No code references derived yet. The next pass can enrich these from
+                              exemplar stack frames.
                             </p>
                           </Show>
                         </div>
@@ -2381,7 +2501,10 @@ function ProjectSettingsSection(props: {
   onHeaderLoadingChange: (active: boolean, label: string) => void;
   onAssignSentryConnection: (projectId: string, connectionId: string) => Promise<HotfixProject>;
   onRefreshSentryProjects: (projectId: string) => Promise<HotfixProject>;
-  onUpdateSentryProjectSelection: (projectId: string, includedProjectIds: string[]) => Promise<void>;
+  onUpdateSentryProjectSelection: (
+    projectId: string,
+    includedProjectIds: string[],
+  ) => Promise<void>;
 }) {
   const [draftIncludedIds, setDraftIncludedIds] = createSignal<string[]>(
     props.project.sentryProjects.filter((project) => project.included).map((project) => project.id),
@@ -2397,7 +2520,9 @@ function ProjectSettingsSection(props: {
 
   createEffect(() => {
     setDraftIncludedIds(
-      props.project.sentryProjects.filter((project) => project.included).map((project) => project.id),
+      props.project.sentryProjects
+        .filter((project) => project.included)
+        .map((project) => project.id),
     );
     setSelectedConnectionId(props.project.sentryOrganization?.connectionId ?? "");
     setSaveError(null);
@@ -2410,7 +2535,11 @@ function ProjectSettingsSection(props: {
   });
 
   const isDirty = createMemo(() => {
-    const current = new Set(props.project.sentryProjects.filter((project) => project.included).map((project) => project.id));
+    const current = new Set(
+      props.project.sentryProjects
+        .filter((project) => project.included)
+        .map((project) => project.id),
+    );
     const draft = new Set(draftIncludedIds());
     if (current.size !== draft.size) {
       return true;
@@ -2427,7 +2556,9 @@ function ProjectSettingsSection(props: {
 
   const toggleProject = (projectId: string) => {
     setDraftIncludedIds((current) =>
-      current.includes(projectId) ? current.filter((id) => id !== projectId) : [...current, projectId],
+      current.includes(projectId)
+        ? current.filter((id) => id !== projectId)
+        : [...current, projectId],
     );
   };
 
@@ -2449,7 +2580,8 @@ function ProjectSettingsSection(props: {
     try {
       await props.onUpdateSentryProjectSelection(props.project.id, includedProjectIds);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not update Sentry project selection.";
+      const message =
+        error instanceof Error ? error.message : "Could not update Sentry project selection.";
       setSaveError(message);
     } finally {
       setSaving(false);
@@ -2518,7 +2650,9 @@ function ProjectSettingsSection(props: {
       await props.onAssignSentryConnection(props.project.id, selectedConnectionId());
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Could not connect the selected Sentry organization.";
+        error instanceof Error
+          ? error.message
+          : "Could not connect the selected Sentry organization.";
       setSaveError(message);
     } finally {
       setAssigningConnection(false);
@@ -2593,7 +2727,11 @@ function ProjectSettingsSection(props: {
               </select>
               <span class="projects-select-caret" aria-hidden="true">
                 <svg viewBox="0 0 16 16" fill="none">
-                  <path d="m4.25 6.25 3.75 3.75 3.75-3.75" stroke="currentColor" stroke-width="1.15" />
+                  <path
+                    d="m4.25 6.25 3.75 3.75 3.75-3.75"
+                    stroke="currentColor"
+                    stroke-width="1.15"
+                  />
                 </svg>
               </span>
             </div>
@@ -2603,7 +2741,11 @@ function ProjectSettingsSection(props: {
               onClick={() => void connectSentryOrganization()}
               disabled={!selectedConnectionId() || assigningConnection()}
             >
-              {assigningConnection() ? "Connecting..." : props.project.sentryOrganization ? "Switch org" : "Connect org"}
+              {assigningConnection()
+                ? "Connecting..."
+                : props.project.sentryOrganization
+                  ? "Switch org"
+                  : "Connect org"}
             </button>
           </div>
         </Show>
@@ -2616,7 +2758,8 @@ function ProjectSettingsSection(props: {
             <p class="logged-in-card-label">No Sentry projects</p>
             <h3 class="logged-in-card-title">Nothing to configure yet</h3>
             <p class="logged-in-card-copy">
-              Connect a Sentry organization and import its projects before configuring inclusion here.
+              Connect a Sentry organization and import its projects before configuring inclusion
+              here.
             </p>
           </div>
         }
@@ -2640,9 +2783,7 @@ function ProjectSettingsSection(props: {
                     <span class="project-settings-item-title">{sentryProject.name}</span>
                     <span class="project-settings-item-meta">
                       {sentryProject.slug}
-                      <Show when={sentryProject.platform}>
-                        {(platform) => ` · ${platform()}`}
-                      </Show>
+                      <Show when={sentryProject.platform}>{(platform) => ` · ${platform()}`}</Show>
                     </span>
                   </span>
                 </label>
@@ -2746,7 +2887,11 @@ function ViewModeIcon(props: { mode: ProjectsView }) {
       </Show>
       <Show when={props.mode === "list"}>
         <svg viewBox="0 0 16 16" fill="none">
-          <path d="M4 4h8M4 8h8M4 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01" stroke="currentColor" stroke-width="1.15" />
+          <path
+            d="M4 4h8M4 8h8M4 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01"
+            stroke="currentColor"
+            stroke-width="1.15"
+          />
         </svg>
       </Show>
     </span>
@@ -2754,7 +2899,9 @@ function ViewModeIcon(props: { mode: ProjectsView }) {
 }
 
 function UserAvatar(props: { user: AuthenticatedUser }) {
-  const initials = createMemo(() => getUserInitials(props.user.displayName || props.user.email || "H"));
+  const initials = createMemo(() =>
+    getUserInitials(props.user.displayName || props.user.email || "H"),
+  );
 
   return (
     <Show
@@ -2796,7 +2943,12 @@ function AccountSettingsModal(props: {
               Account settings
             </h2>
           </div>
-          <button class="project-modal-close" type="button" aria-label="Close" onClick={() => props.onClose()}>
+          <button
+            class="project-modal-close"
+            type="button"
+            aria-label="Close"
+            onClick={() => props.onClose()}
+          >
             ×
           </button>
         </div>
@@ -2810,7 +2962,9 @@ function AccountSettingsModal(props: {
               </span>
               <div>
                 <h3 class="logged-in-card-title">{props.user.displayName}</h3>
-                <p class="logged-in-card-copy">{props.user.email ?? "No email exposed by the provider."}</p>
+                <p class="logged-in-card-copy">
+                  {props.user.email ?? "No email exposed by the provider."}
+                </p>
               </div>
             </div>
           </div>
@@ -2922,7 +3076,9 @@ function ProviderButton(props: { href: string; label: string; iconSrc: string; s
 function LegalSection(props: { title: string; body: string }) {
   return (
     <section class="space-y-2">
-      <h2 class="text-[1rem] font-medium tracking-[-0.02em] text-[var(--text-primary)]">{props.title}</h2>
+      <h2 class="text-[1rem] font-medium tracking-[-0.02em] text-[var(--text-primary)]">
+        {props.title}
+      </h2>
       <p>{props.body}</p>
     </section>
   );
@@ -2934,15 +3090,7 @@ function isEditableTarget(target: EventTarget | null) {
   }
 
   if (target instanceof HTMLInputElement) {
-    const textLikeTypes = new Set([
-      "text",
-      "search",
-      "email",
-      "password",
-      "url",
-      "tel",
-      "number",
-    ]);
+    const textLikeTypes = new Set(["text", "search", "email", "password", "url", "tel", "number"]);
     return textLikeTypes.has(target.type);
   }
 
@@ -2988,7 +3136,12 @@ function getProjectRoute(pathname: string): ProjectRouteState {
   }
 
   const [slugSegment, sectionSegment] = segments;
-  if (!slugSegment || slugSegment === "api" || slugSegment === "terms" || slugSegment === "privacy") {
+  if (
+    !slugSegment ||
+    slugSegment === "api" ||
+    slugSegment === "terms" ||
+    slugSegment === "privacy"
+  ) {
     return { slug: null, section: "home" };
   }
 
@@ -3019,7 +3172,9 @@ function getProjectPath(slug: string | null, section: ProjectRouteSection) {
 }
 
 function isProjectSectionTab(value: string): value is ProjectSectionTab {
-  return value === "logs" || value === "incidents" || value === "performance" || value === "settings";
+  return (
+    value === "logs" || value === "incidents" || value === "performance" || value === "settings"
+  );
 }
 
 function getProjectCreatedAtTimestamp(createdAt: number | string) {
@@ -3084,23 +3239,21 @@ function buildSparklinePath(values: number[], width: number, height: number) {
 function scrambleBrandWord(frame: number, totalFrames: number): BrandGlyph[] {
   const progress = frame / totalFrames;
 
-  return brandText
-    .split("")
-    .map((character, index) => {
-      const resolved = progress > (index + 1) / brandText.length;
-      if (resolved) {
-        return {
-          character,
-          accent: false,
-        };
-      }
-
-      const variants = glyphVariants[character] ?? [character];
+  return brandText.split("").map((character, index) => {
+    const resolved = progress > (index + 1) / brandText.length;
+    if (resolved) {
       return {
-        character: variants[Math.floor(Math.random() * variants.length)] ?? character,
-        accent: (frame + index) % 2 === 0,
+        character,
+        accent: false,
       };
-    });
+    }
+
+    const variants = glyphVariants[character] ?? [character];
+    return {
+      character: variants[Math.floor(Math.random() * variants.length)] ?? character,
+      accent: (frame + index) % 2 === 0,
+    };
+  });
 }
 
 function createBaseBrandGlyphs(): BrandGlyph[] {

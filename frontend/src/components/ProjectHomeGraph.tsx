@@ -5,6 +5,7 @@ import {
   createMemo,
   createResource,
   createSignal,
+  on,
   onCleanup,
   untrack,
 } from "solid-js";
@@ -17,6 +18,8 @@ type ProjectGraphNodeMetadata = {
   githubRepoFullName?: string | null;
   githubRepoUrl?: string | null;
   githubRepoDefaultBranch?: string | null;
+  githubRepoSelectedBranch?: string | null;
+  indexedCommitSha?: string | null;
   baseDirectory?: string | null;
   indexingStatus?: string | null;
   indexingPercentage?: number;
@@ -127,6 +130,7 @@ type CreateProjectGraphItemInput = {
   name: string;
   description: string;
   githubRepoId: number;
+  branch: string;
   baseDirectory: string;
   linkedImportedSentryProjectId: string | null;
 };
@@ -137,6 +141,12 @@ type GitHubRepositoryPayload = {
   htmlUrl: string;
   defaultBranch: string | null;
   private: boolean;
+};
+
+type GitHubBranchPayload = {
+  name: string;
+  commitSha: string;
+  isDefault: boolean;
 };
 
 type ImportedSentryProjectSummary = {
@@ -245,6 +255,19 @@ async function fetchGitHubRepositories() {
   });
 }
 
+async function fetchGitHubBranches(repoId: number, query: string) {
+  const search = query.trim();
+  const url =
+    search.length > 0
+      ? `/api/github/repositories/${repoId}/branches?q=${encodeURIComponent(search)}`
+      : `/api/github/repositories/${repoId}/branches`;
+  return fetchJson<GitHubBranchPayload[]>(url, {
+    headers: {
+      Accept: "application/json",
+    },
+  });
+}
+
 async function createProjectGraphItem(projectId: string, input: CreateProjectGraphItemInput) {
   return fetchJson<ProjectGraphPayload>(`/api/hotfix-projects/${projectId}/graph/items`, {
     method: "POST",
@@ -261,11 +284,15 @@ function nodeSubtitle(node: ProjectGraphNode) {
 }
 
 function nodeFooter(node: ProjectGraphNode) {
+  const branch = node.metadata.githubRepoSelectedBranch ?? node.metadata.githubRepoDefaultBranch;
+  const repoLabel = branch
+    ? `${node.metadata.githubRepoFullName ?? "GitHub repo"} @ ${branch}`
+    : (node.metadata.githubRepoFullName ?? "GitHub repo");
   if (node.metadata.baseDirectory) {
-    return `${node.metadata.githubRepoFullName ?? "GitHub repo"} · ${node.metadata.baseDirectory}`;
+    return `${repoLabel} · ${node.metadata.baseDirectory}`;
   }
 
-  return node.metadata.githubRepoFullName ?? "GitHub repository";
+  return repoLabel;
 }
 
 function nodeStatus(node: ProjectGraphNode) {
@@ -302,14 +329,12 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
-function buildSnappyConnectorPath(
-  start: { x: number; y: number },
-  end: { x: number; y: number },
-) {
+function buildSnappyConnectorPath(start: { x: number; y: number }, end: { x: number; y: number }) {
   const lead = 18;
   const deltaX = end.x - start.x;
   const midpointOffset = clamp(deltaX / 2, -40, 40);
-  const trunkX = start.x + (Math.abs(deltaX) > lead * 2 ? midpointOffset : (deltaX >= 0 ? lead : -lead));
+  const trunkX =
+    start.x + (Math.abs(deltaX) > lead * 2 ? midpointOffset : deltaX >= 0 ? lead : -lead);
 
   return `M ${start.x} ${start.y} L ${trunkX} ${start.y} L ${trunkX} ${end.y} L ${end.x} ${end.y}`;
 }
@@ -360,7 +385,11 @@ function fallbackSeries(total: number | undefined, bucketCount = 12) {
   return values;
 }
 
-function normalizeSeries(series: number[] | undefined, total: number | undefined, bucketCount = 12) {
+function normalizeSeries(
+  series: number[] | undefined,
+  total: number | undefined,
+  bucketCount = 12,
+) {
   if (!Array.isArray(series) || series.length === 0) {
     return fallbackSeries(total, bucketCount);
   }
@@ -376,7 +405,10 @@ function normalizeSeries(series: number[] | undefined, total: number | undefined
 function chartDataForNode(node: ProjectGraphNode): ProjectMiniChartData {
   return {
     errors: normalizeSeries(node.metadata.errors24hSeries, node.metadata.errors24h),
-    transactions: normalizeSeries(node.metadata.transactions24hSeries, node.metadata.transactions24h),
+    transactions: normalizeSeries(
+      node.metadata.transactions24hSeries,
+      node.metadata.transactions24h,
+    ),
   };
 }
 
@@ -650,6 +682,17 @@ function panelFacts(node: ProjectGraphNode) {
       value: node.metadata.githubRepoFullName ?? "Not connected",
     },
     {
+      label: "Selected branch",
+      value:
+        node.metadata.githubRepoSelectedBranch ??
+        node.metadata.githubRepoDefaultBranch ??
+        "Not selected",
+    },
+    {
+      label: "Indexed commit",
+      value: node.metadata.indexedCommitSha?.slice(0, 12) ?? "Pending",
+    },
+    {
       label: "Base directory",
       value: node.metadata.baseDirectory ?? "Repository root",
     },
@@ -676,7 +719,7 @@ function panelFacts(node: ProjectGraphNode) {
     {
       label: "Hotfix repo",
       value: node.metadata.hotfixRepoConnected
-        ? node.metadata.githubRepoFullName ?? "Connected"
+        ? (node.metadata.githubRepoFullName ?? "Connected")
         : "Not connected",
     },
   ];
@@ -688,13 +731,17 @@ async function mountProjectGraphEditor(
   onLayoutChange: (nodes: ProjectGraphLayoutNode[]) => Promise<void>,
   onNodeActivate: (nodeId: string | null) => void,
 ): Promise<EditorHandle> {
-  const [{ NodeEditor, ClassicPreset }, { AreaPlugin, AreaExtensions }, { LitPlugin, Presets: LitPresets }, { html }] =
-    await Promise.all([
-      import("rete"),
-      import("rete-area-plugin"),
-      import("@retejs/lit-plugin"),
-      import("lit"),
-    ]);
+  const [
+    { NodeEditor, ClassicPreset },
+    { AreaPlugin, AreaExtensions },
+    { LitPlugin, Presets: LitPresets },
+    { html },
+  ] = await Promise.all([
+    import("rete"),
+    import("rete-area-plugin"),
+    import("@retejs/lit-plugin"),
+    import("lit"),
+  ]);
 
   container.replaceChildren();
 
@@ -821,9 +868,7 @@ async function mountProjectGraphEditor(
                   </div>
 
                   <div class="project-graph-node-card-badges">
-                    <span
-                      class=${nodeConnectionBadgeClass(Boolean(node.importedSentryProjectId))}
-                    >
+                    <span class=${nodeConnectionBadgeClass(Boolean(node.importedSentryProjectId))}>
                       ${node.importedSentryProjectId ? "Sentry linked" : "Sentry missing"}
                     </span>
                     <span
@@ -845,13 +890,12 @@ async function mountProjectGraphEditor(
           };
         },
         socket(context) {
-          return () =>
-            html`
-              <span
-                class="project-graph-socket project-graph-socket--${context.side}"
-                aria-hidden="true"
-              ></span>
-            `;
+          return () => html`
+            <span
+              class="project-graph-socket project-graph-socket--${context.side}"
+              aria-hidden="true"
+            ></span>
+          `;
         },
       },
     }) as any,
@@ -953,13 +997,11 @@ async function mountProjectGraphEditor(
     }
   };
 
-  let pointerCandidate:
-    | {
-        nodeId: string;
-        x: number;
-        y: number;
-      }
-    | null = null;
+  let pointerCandidate: {
+    nodeId: string;
+    x: number;
+    y: number;
+  } | null = null;
   let activePointerNodeId: string | null = null;
   let draggedNodeId: string | null = null;
   let translatedDuringPointer = false;
@@ -1044,11 +1086,7 @@ async function mountProjectGraphEditor(
     }
 
     const nodeId = card.dataset.nodeId ?? null;
-    if (
-      nodeId &&
-      suppressClickNodeId === nodeId &&
-      performance.now() < suppressClickUntil
-    ) {
+    if (nodeId && suppressClickNodeId === nodeId && performance.now() < suppressClickUntil) {
       suppressClickNodeId = null;
       return;
     }
@@ -1178,17 +1216,32 @@ function GraphControls(props: {
             <rect x="14.5" y="14.5" width="5" height="5" rx="1.15" />
           </svg>
         </button>
-        <button class="project-home-control-button" type="button" aria-label="Zoom in" onClick={props.onZoomIn}>
+        <button
+          class="project-home-control-button"
+          type="button"
+          aria-label="Zoom in"
+          onClick={props.onZoomIn}
+        >
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M12 6.5v11M6.5 12h11" />
           </svg>
         </button>
-        <button class="project-home-control-button" type="button" aria-label="Zoom out" onClick={props.onZoomOut}>
+        <button
+          class="project-home-control-button"
+          type="button"
+          aria-label="Zoom out"
+          onClick={props.onZoomOut}
+        >
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M6.5 12h11" />
           </svg>
         </button>
-        <button class="project-home-control-button" type="button" aria-label="Fit graph to view" onClick={props.onFit}>
+        <button
+          class="project-home-control-button"
+          type="button"
+          aria-label="Fit graph to view"
+          onClick={props.onFit}
+        >
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M9 5H5v4M15 5h4v4M9 19H5v-4M15 19h4v-4" />
             <path d="M9 5 5 9M15 5l4 4M9 19l-4-4M15 19l4-4" />
@@ -1199,10 +1252,7 @@ function GraphControls(props: {
   );
 }
 
-function ProjectNodePanel(props: {
-  node: ProjectGraphNode;
-  onClose: () => void;
-}) {
+function ProjectNodePanel(props: { node: ProjectGraphNode; onClose: () => void }) {
   const [activity] = createResource(
     () => props.node.importedSentryProjectId,
     async (importedProjectId) => {
@@ -1227,7 +1277,12 @@ function ProjectNodePanel(props: {
           </div>
         </div>
 
-        <button class="project-node-panel-close" type="button" onClick={props.onClose} aria-label="Close panel">
+        <button
+          class="project-node-panel-close"
+          type="button"
+          onClick={props.onClose}
+          aria-label="Close panel"
+        >
           ×
         </button>
       </header>
@@ -1252,7 +1307,8 @@ function ProjectNodePanel(props: {
 
           <Show when={!props.node.importedSentryProjectId}>
             <p class="project-node-panel-copyline">
-              This item is not linked to a Sentry project yet. Connect one from the item modal or project settings.
+              This item is not linked to a Sentry project yet. Connect one from the item modal or
+              project settings.
             </p>
           </Show>
 
@@ -1263,13 +1319,19 @@ function ProjectNodePanel(props: {
           <Show when={activity.error}>
             {(error) => (
               <p class="project-node-panel-copyline">
-                {error() instanceof Error ? error().message : "Could not load recent Sentry events."}
+                {error() instanceof Error
+                  ? error().message
+                  : "Could not load recent Sentry events."}
               </p>
             )}
           </Show>
 
-          <Show when={!activity.loading && !activity.error && (activity()?.errors.length ?? 0) === 0}>
-            <p class="project-node-panel-copyline">No recent Sentry error events were returned for this project.</p>
+          <Show
+            when={!activity.loading && !activity.error && (activity()?.errors.length ?? 0) === 0}
+          >
+            <p class="project-node-panel-copyline">
+              No recent Sentry error events were returned for this project.
+            </p>
           </Show>
 
           <div class="project-node-panel-log-list">
@@ -1287,7 +1349,9 @@ function ProjectNodePanel(props: {
                       <p class="project-node-panel-log-subtitle">{entry.culprit}</p>
                     </Show>
                   </div>
-                  <p class="project-node-panel-log-meta">{formatActivityTimestamp(entry.timestamp)}</p>
+                  <p class="project-node-panel-log-meta">
+                    {formatActivityTimestamp(entry.timestamp)}
+                  </p>
                 </article>
               )}
             </For>
@@ -1302,7 +1366,8 @@ function ProjectNodePanel(props: {
 
           <Show when={!props.node.importedSentryProjectId}>
             <p class="project-node-panel-copyline">
-              Link a Sentry project to this item if you want Hotfix to surface its transactions here.
+              Link a Sentry project to this item if you want Hotfix to surface its transactions
+              here.
             </p>
           </Show>
 
@@ -1310,7 +1375,11 @@ function ProjectNodePanel(props: {
             <p class="project-node-panel-copyline">Loading Sentry transactions…</p>
           </Show>
 
-          <Show when={!activity.loading && !activity.error && (activity()?.transactions.length ?? 0) === 0}>
+          <Show
+            when={
+              !activity.loading && !activity.error && (activity()?.transactions.length ?? 0) === 0
+            }
+          >
             <p class="project-node-panel-copyline">
               No transaction activity was returned for this project in the last 24 hours.
             </p>
@@ -1323,7 +1392,9 @@ function ProjectNodePanel(props: {
                   <div class="project-node-panel-log-copy">
                     <div class="project-node-panel-log-topline">
                       <p class="project-node-panel-log-title">{entry.name}</p>
-                      <span class="project-node-panel-log-chip">{formatMetricCount(entry.count)} hits</span>
+                      <span class="project-node-panel-log-chip">
+                        {formatMetricCount(entry.count)} hits
+                      </span>
                     </div>
                     <p class="project-node-panel-log-subtitle">
                       Average duration {formatDuration(entry.avgDurationMs)}
@@ -1349,12 +1420,14 @@ function EdgeCreationModal(props: {
   onChange: (next: EdgeDraft) => void;
   onSubmit: () => void;
 }) {
-  const isSubmitDisabled = createMemo(
-    () => props.saving || props.draft.label.trim().length === 0,
-  );
+  const isSubmitDisabled = createMemo(() => props.saving || props.draft.label.trim().length === 0);
 
   return (
-    <div class="project-modal-backdrop project-edge-modal-backdrop" role="presentation" onClick={props.onClose}>
+    <div
+      class="project-modal-backdrop project-edge-modal-backdrop"
+      role="presentation"
+      onClick={props.onClose}
+    >
       <section
         class="project-modal project-edge-modal"
         role="dialog"
@@ -1371,7 +1444,12 @@ function EdgeCreationModal(props: {
               Capture the context an agent will not reliably infer from code alone.
             </p>
           </div>
-          <button class="project-modal-close" type="button" onClick={props.onClose} aria-label="Close">
+          <button
+            class="project-modal-close"
+            type="button"
+            onClick={props.onClose}
+            aria-label="Close"
+          >
             ×
           </button>
         </div>
@@ -1402,7 +1480,8 @@ function EdgeCreationModal(props: {
                 props.onChange({
                   ...props.draft,
                   label: event.currentTarget.value,
-                })}
+                })
+              }
             />
           </label>
 
@@ -1417,7 +1496,8 @@ function EdgeCreationModal(props: {
                     props.onChange({
                       ...props.draft,
                       interactionType: event.currentTarget.value,
-                    })}
+                    })
+                  }
                 >
                   <For each={EDGE_INTERACTION_TYPES}>
                     {(option) => <option value={option.value}>{option.label}</option>}
@@ -1442,7 +1522,8 @@ function EdgeCreationModal(props: {
                   props.onChange({
                     ...props.draft,
                     transport: event.currentTarget.value,
-                  })}
+                  })
+                }
               />
             </label>
           </div>
@@ -1458,7 +1539,8 @@ function EdgeCreationModal(props: {
                 props.onChange({
                   ...props.draft,
                   touchpoints: event.currentTarget.value,
-                })}
+                })
+              }
             />
           </label>
 
@@ -1473,7 +1555,8 @@ function EdgeCreationModal(props: {
                 props.onChange({
                   ...props.draft,
                   dataContract: event.currentTarget.value,
-                })}
+                })
+              }
             />
           </label>
 
@@ -1488,7 +1571,8 @@ function EdgeCreationModal(props: {
                 props.onChange({
                   ...props.draft,
                   contextNotInCode: event.currentTarget.value,
-                })}
+                })
+              }
             />
           </label>
 
@@ -1523,15 +1607,57 @@ function AddProjectItemModal(props: {
   const [name, setName] = createSignal("");
   const [description, setDescription] = createSignal("");
   const [githubRepoId, setGitHubRepoId] = createSignal("");
+  const [branchSearch, setBranchSearch] = createSignal("");
+  const [branchName, setBranchName] = createSignal("");
   const [baseDirectory, setBaseDirectory] = createSignal("");
   const [linkedImportedSentryProjectId, setLinkedImportedSentryProjectId] = createSignal("");
+  const [githubBranches] = createResource(
+    () => {
+      const repoId = githubRepoId().trim();
+      if (!repoId) {
+        return null;
+      }
+      return {
+        repoId: Number(repoId),
+        query: branchSearch(),
+      };
+    },
+    async (source) => fetchGitHubBranches(source.repoId, source.query),
+  );
+
+  createEffect(
+    on(githubRepoId, () => {
+      setBranchSearch("");
+      setBranchName("");
+    }),
+  );
+
+  createEffect(() => {
+    const branches = githubBranches();
+    if (!branches || branches.length === 0 || branchName().trim().length > 0) {
+      return;
+    }
+
+    const defaultBranch = branches.find((branch) => branch.isDefault) ?? branches[0];
+    if (defaultBranch) {
+      setBranchName(defaultBranch.name);
+    }
+  });
 
   const canSubmit = createMemo(
-    () => !props.saving && name().trim().length > 0 && githubRepoId().trim().length > 0,
+    () =>
+      !props.saving &&
+      name().trim().length > 0 &&
+      githubRepoId().trim().length > 0 &&
+      branchName().trim().length > 0,
   );
 
   return (
-    <div class="project-modal-backdrop project-edge-modal-backdrop" role="presentation" onClick={props.onClose}>
+    <div
+      class="project-modal-backdrop project-edge-modal-backdrop"
+      role="presentation"
+      onClick={props.onClose}
+    >
       <section
         class="project-modal project-edge-modal"
         role="dialog"
@@ -1545,10 +1671,16 @@ function AddProjectItemModal(props: {
               Add an item to the canvas
             </h2>
             <p class="project-edge-modal-copy">
-              Create a repo-backed item, optionally attach one imported Sentry project, and let Hotfix track indexing state on it.
+              Create a repo-backed item, optionally attach one imported Sentry project, and let
+              Hotfix track indexing state on it.
             </p>
           </div>
-          <button class="project-modal-close" type="button" onClick={props.onClose} aria-label="Close">
+          <button
+            class="project-modal-close"
+            type="button"
+            onClick={props.onClose}
+            aria-label="Close"
+          >
             ×
           </button>
         </div>
@@ -1564,6 +1696,7 @@ function AddProjectItemModal(props: {
               name: name().trim(),
               description: description(),
               githubRepoId: Number(githubRepoId()),
+              branch: branchName().trim(),
               baseDirectory: baseDirectory(),
               linkedImportedSentryProjectId:
                 linkedImportedSentryProjectId().trim().length > 0
@@ -1618,10 +1751,73 @@ function AddProjectItemModal(props: {
                 </select>
                 <span class="projects-select-caret" aria-hidden="true">
                   <svg viewBox="0 0 16 16" fill="none">
-                    <path d="m4.25 6.25 3.75 3.75 3.75-3.75" stroke="currentColor" stroke-width="1.15" />
+                    <path
+                      d="m4.25 6.25 3.75 3.75 3.75-3.75"
+                      stroke="currentColor"
+                      stroke-width="1.15"
+                    />
                   </svg>
                 </span>
               </div>
+            </Show>
+          </label>
+
+          <label class="project-field">
+            <span class="project-field-label">Branch</span>
+            <Show
+              when={githubRepoId().trim().length > 0}
+              fallback={
+                <p class="project-field-helper">
+                  Select a GitHub repository first to load branches.
+                </p>
+              }
+            >
+              <input
+                class="project-field-input"
+                type="search"
+                value={branchSearch()}
+                placeholder="Filter branches"
+                onInput={(event) => setBranchSearch(event.currentTarget.value)}
+              />
+              <div class="projects-select-wrap">
+                <select
+                  class="project-field-input project-field-select"
+                  value={branchName()}
+                  onInput={(event) => setBranchName(event.currentTarget.value)}
+                  disabled={githubBranches.loading || (githubBranches()?.length ?? 0) === 0}
+                >
+                  <option value="">
+                    {githubBranches.loading ? "Loading branches..." : "Select a branch"}
+                  </option>
+                  <For each={githubBranches() ?? []}>
+                    {(branch) => (
+                      <option value={branch.name}>
+                        {branch.isDefault ? `${branch.name} (default)` : branch.name}
+                      </option>
+                    )}
+                  </For>
+                </select>
+                <span class="projects-select-caret" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" fill="none">
+                    <path
+                      d="m4.25 6.25 3.75 3.75 3.75-3.75"
+                      stroke="currentColor"
+                      stroke-width="1.15"
+                    />
+                  </svg>
+                </span>
+              </div>
+              <p class="project-field-helper">
+                {githubBranches.error
+                  ? githubBranches.error instanceof Error
+                    ? githubBranches.error.message
+                    : "Could not load branches for that repository."
+                  : githubBranches.loading
+                    ? "Loading branches for the selected repository."
+                    : (githubBranches()?.length ?? 0) === 0
+                      ? "No branches matched the current search."
+                      : "Choose the branch from the dropdown. The search field only filters the list."}
+              </p>
             </Show>
           </label>
 
@@ -1646,13 +1842,17 @@ function AddProjectItemModal(props: {
               onInput={(event) => setBaseDirectory(event.currentTarget.value)}
             />
             <p class="project-field-helper">
-              Optional. Use this when the repository is a monorepo and this item lives below the repository root.
+              Optional. Use this when the repository is a monorepo and this item lives below the
+              repository root.
             </p>
           </label>
 
           <label class="project-field">
             <span class="project-field-label">Linked Sentry project</span>
-            <div class="projects-select-wrap" classList={{ "is-disabled": props.sentryProjects.length === 0 }}>
+            <div
+              class="projects-select-wrap"
+              classList={{ "is-disabled": props.sentryProjects.length === 0 }}
+            >
               <select
                 class="project-field-input project-field-select"
                 value={linkedImportedSentryProjectId()}
@@ -1670,12 +1870,17 @@ function AddProjectItemModal(props: {
               </select>
               <span class="projects-select-caret" aria-hidden="true">
                 <svg viewBox="0 0 16 16" fill="none">
-                  <path d="m4.25 6.25 3.75 3.75 3.75-3.75" stroke="currentColor" stroke-width="1.15" />
+                  <path
+                    d="m4.25 6.25 3.75 3.75 3.75-3.75"
+                    stroke="currentColor"
+                    stroke-width="1.15"
+                  />
                 </svg>
               </span>
             </div>
             <p class="project-field-helper">
-              Optional. Import Sentry projects in Settings first if you want this item to show Sentry activity and metrics.
+              Optional. Import Sentry projects in Settings first if you want this item to show
+              Sentry activity and metrics.
             </p>
           </label>
 
@@ -1698,7 +1903,7 @@ function AddProjectItemModal(props: {
 }
 
 export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
-  const [graph, { mutate }] = createResource(
+  const [graph, { mutate, refetch }] = createResource(
     () => `${props.projectId}:${props.refreshKey}`,
     async () => fetchProjectGraph(props.projectId),
   );
@@ -1707,7 +1912,9 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
   const [itemSaving, setItemSaving] = createSignal(false);
   const [selectedNodeId, setSelectedNodeId] = createSignal<string | null>(null);
   const [linkSourceNodeId, setLinkSourceNodeId] = createSignal<string | null>(null);
-  const [linkPreviewPoint, setLinkPreviewPoint] = createSignal<{ x: number; y: number } | null>(null);
+  const [linkPreviewPoint, setLinkPreviewPoint] = createSignal<{ x: number; y: number } | null>(
+    null,
+  );
   const [edgeDraft, setEdgeDraft] = createSignal<EdgeDraft | null>(null);
   const [edgeSaveError, setEdgeSaveError] = createSignal<string | null>(null);
   const [edgeSaving, setEdgeSaving] = createSignal(false);
@@ -1723,7 +1930,9 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
   const selectedNode = createMemo(
     () => graph()?.nodes.find((node) => node.id === selectedNodeId()) ?? null,
   );
-  const isEmpty = createMemo(() => !graph.loading && !graph.error && (graph()?.nodes.length ?? 0) === 0);
+  const isEmpty = createMemo(
+    () => !graph.loading && !graph.error && (graph()?.nodes.length ?? 0) === 0,
+  );
   const hasPanel = createMemo(() => Boolean(selectedNode()));
   const edgeTargetNode = createMemo(
     () => graph()?.nodes.find((node) => node.id === edgeDraft()?.targetNodeId) ?? null,
@@ -1910,7 +2119,8 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
       setItemModalOpen(false);
       setSelectedNodeId(null);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not add the item to the canvas.";
+      const message =
+        error instanceof Error ? error.message : "Could not add the item to the canvas.";
       setItemSaveError(message);
     } finally {
       setItemSaving(false);
@@ -1943,6 +2153,28 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
 
   createEffect(() => {
     applyEditorVisualState();
+  });
+
+  createEffect(() => {
+    const payload = graph();
+    if (!payload || typeof window === "undefined") {
+      return;
+    }
+
+    const hasActiveIndexing = payload.nodes.some((node) => {
+      const indexingStatus = (node.metadata.indexingStatus ?? "pending").toLowerCase();
+      return (
+        indexingStatus === "queued" || indexingStatus === "pending" || indexingStatus === "indexing"
+      );
+    });
+    if (!hasActiveIndexing) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      void refetch();
+    }, 3000);
+    onCleanup(() => window.clearInterval(interval));
   });
 
   createEffect(() => {
@@ -2118,7 +2350,12 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
       classList={{ "has-panel": hasPanel(), "is-link-armed": Boolean(linkSourceNodeId()) }}
     >
       <div class="project-home-stage">
-        <div ref={containerRef} class="project-home-canvas" />
+        <div
+          ref={(value) => {
+            containerRef = value;
+          }}
+          class="project-home-canvas"
+        />
 
         <Show when={previewPath()}>
           {(path) => (
@@ -2158,7 +2395,9 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
           onZoomIn={() => void editorHandle?.zoomBy(1.12)}
           onZoomOut={() => void editorHandle?.zoomBy(0.9)}
           onFit={() =>
-            void editorHandle?.fitToView(hasPanel() ? GRAPH_PANEL_FIT_SCALE : GRAPH_DEFAULT_FIT_SCALE)
+            void editorHandle?.fitToView(
+              hasPanel() ? GRAPH_PANEL_FIT_SCALE : GRAPH_DEFAULT_FIT_SCALE,
+            )
           }
         />
 
@@ -2189,7 +2428,8 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
             <div class="project-home-status">
               <p class="project-home-status-label">No canvas items yet</p>
               <p class="project-home-status-copy">
-                Add your first repo-backed item, then optionally link one imported Sentry project to it.
+                Add your first repo-backed item, then optionally link one imported Sentry project to
+                it.
               </p>
             </div>
           </div>
@@ -2203,7 +2443,13 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
           saving={itemSaving()}
           error={itemSaveError()}
           githubLoading={githubRepos.loading}
-          githubError={githubRepos.error ? (githubRepos.error instanceof Error ? githubRepos.error.message : "GitHub is unavailable.") : null}
+          githubError={
+            githubRepos.error
+              ? githubRepos.error instanceof Error
+                ? githubRepos.error.message
+                : "GitHub is unavailable."
+              : null
+          }
           onClose={closeItemModal}
           onSubmit={(input) => void handleItemCreate(input)}
         />
