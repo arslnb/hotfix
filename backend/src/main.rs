@@ -436,6 +436,7 @@ struct SessionUser {
     id: Uuid,
     display_name: String,
     email: Option<String>,
+    avatar_url: Option<String>,
     providers: ConnectedProviders,
 }
 
@@ -444,6 +445,7 @@ struct SessionUserRow {
     id: Uuid,
     display_name: String,
     email: Option<String>,
+    avatar_url: Option<String>,
     github_connected: bool,
     sentry_connected: bool,
 }
@@ -461,6 +463,7 @@ impl From<SessionUserRow> for SessionUser {
             id: row.id,
             display_name: row.display_name,
             email: row.email,
+            avatar_url: row.avatar_url,
             providers: ConnectedProviders {
                 github: row.github_connected,
                 sentry: row.sentry_connected,
@@ -2709,6 +2712,14 @@ async fn query_session_user_optional(
             users.id,
             users.display_name,
             users.email,
+            (
+                select auth_identities.avatar_url
+                from auth_identities
+                where auth_identities.user_id = users.id
+                  and auth_identities.avatar_url is not null
+                order by auth_identities.last_login_at desc, auth_identities.updated_at desc
+                limit 1
+            ) as avatar_url,
             exists(
                 select 1
                 from provider_connections
@@ -2742,6 +2753,14 @@ async fn query_session_user(
             users.id,
             users.display_name,
             users.email,
+            (
+                select auth_identities.avatar_url
+                from auth_identities
+                where auth_identities.user_id = users.id
+                  and auth_identities.avatar_url is not null
+                order by auth_identities.last_login_at desc, auth_identities.updated_at desc
+                limit 1
+            ) as avatar_url,
             exists(
                 select 1
                 from provider_connections

@@ -12,13 +12,11 @@ import { ProjectHomeGraph } from "./components/ProjectHomeGraph";
 
 const sentryIcon = new URL("./assets/sentry.svg", import.meta.url).href;
 const githubIcon = new URL("./assets/github.svg", import.meta.url).href;
-const sidebarProjectsIcon = new URL("./assets/sidebar/icons8-project-50.svg", import.meta.url).href;
-const sidebarUsageIcon = new URL("./assets/sidebar/icons8-combo-chart-50.svg", import.meta.url).href;
-const sidebarSettingsIcon = new URL("./assets/sidebar/icons8-settings-50.svg", import.meta.url).href;
 const sidebarHomeIcon = new URL("./assets/sidebar/icons8-home-50.svg", import.meta.url).href;
 const sidebarLogsIcon = new URL("./assets/sidebar/icons8-rfid-signal-50.svg", import.meta.url).href;
 const sidebarIncidentsIcon = new URL("./assets/sidebar/icons8-insect-50.svg", import.meta.url).href;
 const sidebarPerformanceIcon = new URL("./assets/sidebar/icons8-speed-50.svg", import.meta.url).href;
+const sidebarSettingsIcon = new URL("./assets/sidebar/icons8-settings-50.svg", import.meta.url).href;
 const brandText = "Hotfix";
 const glyphVariants: Record<string, string[]> = {
   H: ["H", "#", "4"],
@@ -35,12 +33,15 @@ type SessionResponse = {
     id: string;
     displayName: string;
     email: string | null;
+    avatarUrl: string | null;
     providers: {
       github: boolean;
       sentry: boolean;
     };
   } | null;
 };
+
+type AuthenticatedUser = NonNullable<SessionResponse["user"]>;
 
 type SentryOrganizationSummary = {
   connectionId: string;
@@ -126,7 +127,6 @@ type BrandGlyph = {
   character: string;
   accent: boolean;
 };
-type AppTab = "projects" | "usage" | "settings";
 type ProjectSectionTab = "logs" | "incidents" | "performance" | "settings";
 type ProjectRouteSection = "home" | ProjectSectionTab;
 type ProjectsSort = "created" | "alphabetical";
@@ -596,24 +596,18 @@ function LoginPanel(props: { notice: string | null }) {
 }
 
 function AuthenticatedPanel(props: {
-  user: SessionResponse["user"];
+  user: AuthenticatedUser;
   notice: string | null;
   loggingOut: boolean;
   onLogout: () => Promise<void>;
 }) {
-  const [activeTab, setActiveTab] = createSignal<AppTab>("projects");
   const [activeProjectSection, setActiveProjectSection] = createSignal<ProjectRouteSection>(
     getProjectRoute(window.location.pathname).section,
   );
-  const [accountMenuOpen, setAccountMenuOpen] = createSignal(false);
   const [showSidebarShortcuts, setShowSidebarShortcuts] = createSignal(false);
-  const [projectsResetToken, setProjectsResetToken] = createSignal(0);
-  const [forceSidebarCollapsed, setForceSidebarCollapsed] = createSignal(false);
-  const appTabs: Array<{ id: AppTab; label: string; shortcut: string }> = [
-    { id: "projects", label: "Projects", shortcut: "1" },
-    { id: "usage", label: "Usage", shortcut: "2" },
-    { id: "settings", label: "Settings", shortcut: "3" },
-  ];
+  const [projectNavigationVisible, setProjectNavigationVisible] = createSignal(
+    Boolean(getProjectRoute(window.location.pathname).slug),
+  );
   const projectTabs: Array<{ id: ProjectRouteSection; label: string; shortcut: string }> = [
     { id: "home", label: "Home", shortcut: "1" },
     { id: "logs", label: "Logs", shortcut: "2" },
@@ -621,35 +615,10 @@ function AuthenticatedPanel(props: {
     { id: "performance", label: "Performance", shortcut: "4" },
     { id: "settings", label: "Settings", shortcut: "5" },
   ];
-  const sidebarTabs = (): Array<{ id: AppTab | ProjectRouteSection; label: string; shortcut: string }> =>
-    forceSidebarCollapsed() ? projectTabs : appTabs;
-
-  const activateTab = (nextTab: AppTab) => {
-    if (nextTab === "projects" && activeTab() === "projects") {
-      setProjectsResetToken((token) => token + 1);
-      setForceSidebarCollapsed(false);
-      return;
-    }
-
-    if (nextTab !== "projects") {
-      setForceSidebarCollapsed(false);
-    }
-
-    setActiveTab(nextTab);
-  };
 
   onMount(() => {
-    const handlePointerDown = (event: MouseEvent) => {
-      const target = event.target;
-      if (target instanceof HTMLElement && target.closest("[data-account-menu]")) {
-        return;
-      }
-
-      setAccountMenuOpen(false);
-    };
-
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Control" || event.ctrlKey) {
+      if ((event.key === "Control" || event.ctrlKey) && projectNavigationVisible()) {
         setShowSidebarShortcuts(true);
       }
 
@@ -661,26 +630,17 @@ function AuthenticatedPanel(props: {
         return;
       }
 
-      if (forceSidebarCollapsed()) {
-        const nextProjectTab = projectTabs.find((tab) => tab.shortcut === event.key);
-        if (!nextProjectTab) {
-          return;
-        }
-
-        event.preventDefault();
-        setAccountMenuOpen(false);
-        setActiveProjectSection(nextProjectTab.id);
+      if (!projectNavigationVisible()) {
         return;
       }
 
-      const nextTab = appTabs.find((tab) => tab.shortcut === event.key);
-      if (!nextTab) {
+      const nextProjectTab = projectTabs.find((tab) => tab.shortcut === event.key);
+      if (!nextProjectTab) {
         return;
       }
 
       event.preventDefault();
-      setAccountMenuOpen(false);
-      activateTab(nextTab.id);
+      setActiveProjectSection(nextProjectTab.id);
     };
 
     const handleKeyUp = (event: KeyboardEvent) => {
@@ -693,12 +653,10 @@ function AuthenticatedPanel(props: {
       setShowSidebarShortcuts(false);
     };
 
-    window.addEventListener("mousedown", handlePointerDown);
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("keyup", handleKeyUp);
     window.addEventListener("blur", handleWindowBlur);
     onCleanup(() => {
-      window.removeEventListener("mousedown", handlePointerDown);
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("blur", handleWindowBlur);
@@ -707,118 +665,49 @@ function AuthenticatedPanel(props: {
 
   return (
     <section class="logged-in-shell flex w-full flex-1">
-      <aside class="app-sidebar" classList={{ "is-collapsed": forceSidebarCollapsed() }}>
-        <Show when={!forceSidebarCollapsed()}>
-          <a href="/" class="app-sidebar-brand" aria-label="Go to dashboard">
-            <BrandWordmark mode="hover" />
-          </a>
-
-          <div class="app-sidebar-gap" aria-hidden="true" />
-        </Show>
-
-        <nav class="app-sidebar-nav" aria-label="Primary">
-          <For each={sidebarTabs()}>
-            {(tab) => (
-              <button
-                class="app-sidebar-item"
-                classList={{
-                  "is-active": forceSidebarCollapsed()
-                    ? activeProjectSection() === tab.id
-                    : activeTab() === tab.id,
-                  "show-shortcut": showSidebarShortcuts(),
-                }}
-                type="button"
-                onClick={() => {
-                  if (forceSidebarCollapsed()) {
-                    setActiveProjectSection(tab.id as ProjectRouteSection);
-                    return;
-                  }
-
-                  activateTab(tab.id as AppTab);
-                }}
-                aria-pressed={
-                  forceSidebarCollapsed()
-                    ? activeProjectSection() === tab.id
-                    : activeTab() === tab.id
-                }
-                aria-label={forceSidebarCollapsed() ? tab.label : undefined}
-              >
-                <SidebarIcon tab={tab.id} />
-                <span class="app-sidebar-label">{tab.label}</span>
-                <span class="app-sidebar-shortcut" aria-hidden="true">
-                  ^{tab.shortcut}
-                </span>
-                <span class="app-sidebar-tooltip" aria-hidden="true">
-                  <span class="app-sidebar-tooltip-label">{tab.label}</span>
-                  <span class="app-sidebar-tooltip-shortcut">^{tab.shortcut}</span>
-                </span>
-              </button>
-            )}
-          </For>
-        </nav>
-
-        <div class="app-sidebar-spacer" />
-
-        <div class="app-sidebar-account" data-account-menu>
-          <div class="app-sidebar-account-copy">
-            <p class="app-sidebar-account-name">{props.user?.displayName}</p>
-            <p class="app-sidebar-account-subtitle">{props.user?.email ?? "Signed in"}</p>
-          </div>
-          <div class="app-sidebar-account-actions">
-            <button
-              class="app-sidebar-menu-trigger"
-              type="button"
-              aria-haspopup="menu"
-              aria-expanded={accountMenuOpen()}
-              onClick={() => setAccountMenuOpen((open) => !open)}
-              title="Account menu"
-            >
-              <span />
-              <span />
-              <span />
-            </button>
-          </div>
-
-          <Show when={accountMenuOpen()}>
-            <div class="app-sidebar-popover" role="menu">
-              <button
-                class="app-sidebar-popover-item"
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setAccountMenuOpen(false);
-                  void props.onLogout();
-                }}
-                disabled={props.loggingOut}
-              >
-                {props.loggingOut ? "Logging out..." : "Log out"}
-              </button>
-            </div>
-          </Show>
-        </div>
-      </aside>
+      <Show when={projectNavigationVisible()}>
+        <aside class="app-sidebar is-collapsed is-project-sidebar">
+          <nav class="app-sidebar-nav" aria-label="Project sections">
+            <For each={projectTabs}>
+              {(tab) => (
+                <button
+                  class="app-sidebar-item show-shortcut"
+                  classList={{
+                    "is-active": activeProjectSection() === tab.id,
+                    "show-shortcut": showSidebarShortcuts(),
+                  }}
+                  type="button"
+                  onClick={() => setActiveProjectSection(tab.id)}
+                  aria-pressed={activeProjectSection() === tab.id}
+                  aria-label={tab.label}
+                >
+                  <SidebarIcon tab={tab.id} />
+                  <span class="app-sidebar-label">{tab.label}</span>
+                  <span class="app-sidebar-shortcut" aria-hidden="true">
+                    ^{tab.shortcut}
+                  </span>
+                  <span class="app-sidebar-tooltip" aria-hidden="true">
+                    <span class="app-sidebar-tooltip-label">{tab.label}</span>
+                    <span class="app-sidebar-tooltip-shortcut">^{tab.shortcut}</span>
+                  </span>
+                </button>
+              )}
+            </For>
+          </nav>
+        </aside>
+      </Show>
 
       <div class="logged-in-main">
-        <div class="logged-in-panel">
-          <Show when={activeTab() === "projects"}>
-            <ProjectsTab
-              projectSection={activeProjectSection()}
-              resetToken={projectsResetToken()}
-              onProjectSectionChange={setActiveProjectSection}
-              onProjectOpenChange={setForceSidebarCollapsed}
-            />
-          </Show>
-          <Show when={activeTab() === "usage"}>
-            <UsageTab />
-          </Show>
-          <Show when={activeTab() === "settings"}>
-            <SettingsTab
-              user={props.user}
-              notice={props.notice}
-              loggingOut={props.loggingOut}
-              onLogout={props.onLogout}
-            />
-          </Show>
+        <div class="logged-in-panel" classList={{ "is-project-open": projectNavigationVisible() }}>
+          <ProjectsTab
+            user={props.user}
+            notice={props.notice}
+            loggingOut={props.loggingOut}
+            onLogout={props.onLogout}
+            projectSection={activeProjectSection()}
+            onProjectSectionChange={setActiveProjectSection}
+            onProjectOpenChange={setProjectNavigationVisible}
+          />
         </div>
       </div>
     </section>
@@ -826,14 +715,19 @@ function AuthenticatedPanel(props: {
 }
 
 function ProjectsTab(props: {
+  user: AuthenticatedUser;
+  notice: string | null;
+  loggingOut: boolean;
+  onLogout: () => Promise<void>;
   projectSection: ProjectRouteSection;
-  resetToken: number;
   onProjectSectionChange: (section: ProjectRouteSection) => void;
   onProjectOpenChange: (open: boolean) => void;
 }) {
   const [sortBy, setSortBy] = createSignal<ProjectsSort>("created");
   const [viewMode, setViewMode] = createSignal<ProjectsView>("list");
   const [createModalOpen, setCreateModalOpen] = createSignal(false);
+  const [settingsModalOpen, setSettingsModalOpen] = createSignal(false);
+  const [accountMenuOpen, setAccountMenuOpen] = createSignal(false);
   const [projectName, setProjectName] = createSignal("");
   const [selectedProjectId, setSelectedProjectId] = createSignal<string | null>(null);
   const [openedProjectId, setOpenedProjectId] = createSignal<string | null>(null);
@@ -867,11 +761,11 @@ function ProjectsTab(props: {
   const openedProject = createMemo(() =>
     sortedProjects().find((project) => project.id === openedProjectId()) ?? null,
   );
-  let handledResetToken = props.resetToken;
 
   const openCreateModal = () => {
     setProjectName("");
     setCreateError(null);
+    setAccountMenuOpen(false);
     setCreateModalOpen(true);
   };
 
@@ -911,6 +805,7 @@ function ProjectsTab(props: {
       return;
     }
 
+    setAccountMenuOpen(false);
     setSelectedProjectId(projectId);
     setOpenedProjectId(projectId);
     syncProjectUrl(project.slug, section);
@@ -924,7 +819,10 @@ function ProjectsTab(props: {
   };
 
   const goToProjects = () => closeProject("push");
-  const resetToProjects = () => closeProject("replace");
+  const resetToProjects = () => {
+    setAccountMenuOpen(false);
+    closeProject("replace");
+  };
 
   const moveProjectSelection = (direction: number) => {
     const projects = sortedProjects();
@@ -1017,17 +915,6 @@ function ProjectsTab(props: {
   });
 
   createEffect(() => {
-    const nextResetToken = props.resetToken;
-    if (nextResetToken === handledResetToken) {
-      return;
-    }
-
-    handledResetToken = nextResetToken;
-    resetToProjects();
-    props.onProjectSectionChange("home");
-  });
-
-  createEffect(() => {
     props.onProjectOpenChange(Boolean(openedProjectId()));
   });
 
@@ -1040,8 +927,17 @@ function ProjectsTab(props: {
       setRouteProject(getProjectRoute(window.location.pathname));
     };
 
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (target instanceof HTMLElement && target.closest("[data-projects-account-menu]")) {
+        return;
+      }
+
+      setAccountMenuOpen(false);
+    };
+
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (createModalOpen()) {
+      if (createModalOpen() || settingsModalOpen()) {
         return;
       }
 
@@ -1088,22 +984,29 @@ function ProjectsTab(props: {
       }
     };
 
+    window.addEventListener("mousedown", handlePointerDown);
     window.addEventListener("popstate", handlePopState);
     window.addEventListener("keydown", handleKeyDown);
     onCleanup(() => {
+      window.removeEventListener("mousedown", handlePointerDown);
       window.removeEventListener("popstate", handlePopState);
       window.removeEventListener("keydown", handleKeyDown);
     });
   });
 
   createEffect(() => {
-    if (!createModalOpen()) {
+    if (!createModalOpen() && !settingsModalOpen()) {
       return;
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        closeCreateModal();
+        if (createModalOpen()) {
+          closeCreateModal();
+          return;
+        }
+
+        setSettingsModalOpen(false);
       }
     };
 
@@ -1354,15 +1257,63 @@ function ProjectsTab(props: {
                 <h1 class="projects-title">Projects</h1>
               </div>
 
-              <button class="brand-button" type="button" onClick={openCreateModal} disabled={dashboard.loading}>
-                <span class="brand-button-plus" aria-hidden="true">
-                  +
-                </span>
-                <span>New project</span>
-                <span class="brand-button-shortcut" aria-hidden="true">
-                  N
-                </span>
-              </button>
+              <div class="projects-header-actions">
+                <button class="brand-button" type="button" onClick={openCreateModal} disabled={dashboard.loading}>
+                  <span class="brand-button-plus" aria-hidden="true">
+                    +
+                  </span>
+                  <span>New project</span>
+                  <span class="brand-button-shortcut" aria-hidden="true">
+                    N
+                  </span>
+                </button>
+
+                <div class="projects-account-menu" data-projects-account-menu>
+                  <button
+                    class="projects-account-trigger"
+                    type="button"
+                    aria-haspopup="menu"
+                    aria-expanded={accountMenuOpen()}
+                    onClick={() => setAccountMenuOpen((open) => !open)}
+                  >
+                    <UserAvatar user={props.user} />
+                  </button>
+
+                  <Show when={accountMenuOpen()}>
+                    <div class="projects-account-popover" role="menu">
+                      <div class="projects-account-popover-copy">
+                        <p class="projects-account-popover-name">{props.user.displayName}</p>
+                        <p class="projects-account-popover-email">
+                          {props.user.email ?? "Signed in"}
+                        </p>
+                      </div>
+                      <button
+                        class="projects-account-popover-item"
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setAccountMenuOpen(false);
+                          setSettingsModalOpen(true);
+                        }}
+                      >
+                        Settings
+                      </button>
+                      <button
+                        class="projects-account-popover-item"
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setAccountMenuOpen(false);
+                          void props.onLogout();
+                        }}
+                        disabled={props.loggingOut}
+                      >
+                        {props.loggingOut ? "Logging out..." : "Log out"}
+                      </button>
+                    </div>
+                  </Show>
+                </div>
+              </div>
             </div>
 
             <div class="projects-toolbar">
@@ -1575,6 +1526,16 @@ function ProjectsTab(props: {
             </form>
           </div>
         </div>
+      </Show>
+
+      <Show when={settingsModalOpen()}>
+        <AccountSettingsModal
+          user={props.user}
+          notice={props.notice}
+          loggingOut={props.loggingOut}
+          onClose={() => setSettingsModalOpen(false)}
+          onLogout={props.onLogout}
+        />
       </Show>
     </div>
   );
@@ -2402,115 +2363,109 @@ function ViewModeIcon(props: { mode: ProjectsView }) {
   );
 }
 
-function UsageTab() {
-  return (
-    <div class="space-y-6">
-      <div class="space-y-2">
-        <p class="text-[0.68rem] font-medium uppercase tracking-[0.28em] text-[var(--text-muted)]">
-          Usage
-        </p>
-        <h1 class="text-[1.62rem] font-medium tracking-[-0.05em] text-[var(--text-primary)] sm:text-[1.82rem]">
-          Usage placeholder
-        </h1>
-        <p class="max-w-2xl text-sm text-[var(--text-secondary)]">
-          This tab will eventually show quota, sync volume, imported telemetry volume, and model
-          consumption.
-        </p>
-      </div>
+function UserAvatar(props: { user: AuthenticatedUser }) {
+  const initials = createMemo(() => getUserInitials(props.user.displayName || props.user.email || "H"));
 
-      <div class="logged-in-metric-grid">
-        <div class="logged-in-metric">
-          <p class="logged-in-metric-label">Projects synced</p>
-          <p class="logged-in-metric-value">12</p>
-          <p class="logged-in-metric-copy">Sample value for the future usage dashboard.</p>
-        </div>
-        <div class="logged-in-metric">
-          <p class="logged-in-metric-label">Events analyzed</p>
-          <p class="logged-in-metric-value">84k</p>
-          <p class="logged-in-metric-copy">Placeholder aggregate for errors, traces, and logs.</p>
-        </div>
-        <div class="logged-in-metric">
-          <p class="logged-in-metric-label">Repo matches</p>
-          <p class="logged-in-metric-value">91%</p>
-          <p class="logged-in-metric-copy">This will become a real mapping-confidence view later.</p>
-        </div>
-      </div>
-    </div>
+  return (
+    <Show
+      when={props.user.avatarUrl}
+      fallback={<span class="projects-account-fallback">{initials()}</span>}
+    >
+      {(avatarUrl) => (
+        <img
+          class="projects-account-avatar"
+          src={avatarUrl()}
+          alt={`${props.user.displayName} profile`}
+          loading="lazy"
+        />
+      )}
+    </Show>
   );
 }
 
-function SettingsTab(props: {
-  user: SessionResponse["user"];
+function AccountSettingsModal(props: {
+  user: AuthenticatedUser;
   notice: string | null;
   loggingOut: boolean;
+  onClose: () => void;
   onLogout: () => Promise<void>;
 }) {
   return (
-    <div class="space-y-6">
-      <div class="space-y-2">
-        <p class="text-[0.68rem] font-medium uppercase tracking-[0.28em] text-[var(--text-muted)]">
-          Settings
-        </p>
-        <h1 class="text-[1.62rem] font-medium tracking-[-0.05em] text-[var(--text-primary)] sm:text-[1.82rem]">
-          Account placeholder
-        </h1>
-        <p class="max-w-2xl text-sm text-[var(--text-secondary)]">
-          Provider connection controls and account preferences will live here.
-        </p>
-      </div>
-
-      <div class="logged-in-card-grid">
-        <div class="logged-in-card">
-          <p class="logged-in-card-label">Signed in as</p>
-          <h2 class="logged-in-card-title">{props.user?.displayName}</h2>
-          <p class="logged-in-card-copy">{props.user?.email ?? "No email exposed by the provider."}</p>
+    <div class="project-modal-backdrop" role="presentation" onClick={() => props.onClose()}>
+      <div
+        class="project-modal project-modal--settings"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="account-settings-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div class="project-modal-header">
+          <div>
+            <p class="logged-in-card-label">Settings</p>
+            <h2 class="project-modal-title" id="account-settings-title">
+              Account settings
+            </h2>
+          </div>
+          <button class="project-modal-close" type="button" aria-label="Close" onClick={() => props.onClose()}>
+            ×
+          </button>
         </div>
-        <div class="logged-in-card">
-          <p class="logged-in-card-label">Connections</p>
-          <h2 class="logged-in-card-title">Provider status</h2>
-          <p class="logged-in-card-copy">
-            Sentry: {props.user?.providers.sentry ? "connected" : "not connected"}
-          </p>
-          <p class="logged-in-card-copy">
-            GitHub: {props.user?.providers.github ? "connected" : "not connected"}
-          </p>
+
+        <div class="account-settings-grid">
+          <div class="logged-in-card">
+            <p class="logged-in-card-label">Signed in as</p>
+            <div class="account-settings-identity">
+              <span class="projects-account-chip">
+                <UserAvatar user={props.user} />
+              </span>
+              <div>
+                <h3 class="logged-in-card-title">{props.user.displayName}</h3>
+                <p class="logged-in-card-copy">{props.user.email ?? "No email exposed by the provider."}</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="logged-in-card">
+            <p class="logged-in-card-label">Connections</p>
+            <h3 class="logged-in-card-title">Provider status</h3>
+            <p class="logged-in-card-copy">
+              Sentry: {props.user.providers.sentry ? "connected" : "not connected"}
+            </p>
+            <p class="logged-in-card-copy">
+              GitHub: {props.user.providers.github ? "connected" : "not connected"}
+            </p>
+          </div>
+        </div>
+
+        <Show when={props.notice}>
+          {(message) => (
+            <p class="rounded-[4px] border border-[rgba(229,99,99,0.18)] bg-[rgba(71,24,24,0.35)] px-4 py-3 text-sm text-[rgba(255,197,197,0.94)]">
+              {message()}
+            </p>
+          )}
+        </Show>
+
+        <div class="project-modal-actions">
+          <button class="project-modal-secondary" type="button" onClick={() => props.onClose()}>
+            Close
+          </button>
+          <button
+            class="secondary-button"
+            type="button"
+            onClick={() => void props.onLogout()}
+            disabled={props.loggingOut}
+          >
+            {props.loggingOut ? "Logging out..." : "Log out"}
+          </button>
         </div>
       </div>
-
-      <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p class="text-sm text-[var(--text-secondary)]">
-          This is placeholder settings content. The logout action remains available here.
-        </p>
-        <button
-          class="secondary-button w-full sm:w-auto sm:min-w-[9rem]"
-          type="button"
-          onClick={() => void props.onLogout()}
-          disabled={props.loggingOut}
-        >
-          {props.loggingOut ? "Logging out..." : "Log out"}
-        </button>
-      </div>
-
-      <Show when={props.notice}>
-        {(message) => (
-          <p class="rounded-[4px] border border-[rgba(229,99,99,0.18)] bg-[rgba(71,24,24,0.35)] px-4 py-3 text-sm text-[rgba(255,197,197,0.94)]">
-            {message()}
-          </p>
-        )}
-      </Show>
     </div>
   );
 }
 
-function SidebarIcon(props: { tab: AppTab | ProjectRouteSection }) {
+function SidebarIcon(props: { tab: ProjectRouteSection }) {
   const iconSrc = (() => {
     switch (props.tab) {
-      case "projects":
-        return sidebarProjectsIcon;
-      case "usage":
-        return sidebarUsageIcon;
-      case "settings":
-        return sidebarSettingsIcon;
       case "home":
         return sidebarHomeIcon;
       case "logs":
@@ -2519,6 +2474,8 @@ function SidebarIcon(props: { tab: AppTab | ProjectRouteSection }) {
         return sidebarIncidentsIcon;
       case "performance":
         return sidebarPerformanceIcon;
+      case "settings":
+        return sidebarSettingsIcon;
     }
   })();
 
@@ -2761,6 +2718,20 @@ function createBaseBrandGlyphs(): BrandGlyph[] {
     character,
     accent: false,
   }));
+}
+
+function getUserInitials(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "H";
+  }
+
+  const parts = trimmed.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) {
+    return parts[0]!.slice(0, 2).toUpperCase();
+  }
+
+  return `${parts[0]![0] ?? ""}${parts[1]![0] ?? ""}`.toUpperCase();
 }
 
 function brandAnimationMode(view: AppView, session: SessionResponse | undefined): "loop" | "hover" {
