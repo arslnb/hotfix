@@ -871,12 +871,12 @@ button {
   left: 0;
   right: 0;
   height: 20px;
-  border-top: 2px solid rgb(121, 188, 210);
+  border-top: 1px solid rgb(121, 188, 210);
   border-bottom: 1px solid rgb(121, 188, 210);
   background-image: repeating-linear-gradient(
     -45deg,
-    rgb(121, 188, 210) 0 1px,
-    transparent 1px 5px
+    rgb(121 188 210 / 70%) 0 1px,
+    transparent 1px 1.67px
   );
   pointer-events: none;
   z-index: 8;
