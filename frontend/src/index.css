@@ -861,17 +861,18 @@ button {
   display: flex;
   flex-direction: column;
   gap: 0.58rem;
-  padding: 70px var(--projects-home-inset) 30px;
+  padding: 60px var(--projects-home-inset) 30px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .projects-top-band {
   position: fixed;
-  top: 0;
+  top: 10px;
   left: 0;
   right: 0;
   height: 20px;
-  border-bottom: 1px solid rgb(121, 188, 210);
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   background-image: repeating-linear-gradient(
     -45deg,
     rgb(121 188 210 / 42%) 0 1px,
