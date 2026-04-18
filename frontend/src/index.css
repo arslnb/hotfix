@@ -955,14 +955,14 @@ button {
 }
 
 .project-card.is-grid {
-  min-height: 6.6rem;
+  min-height: 7.85rem;
 }
 
 .project-card.is-grid .project-card-main {
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
-  min-height: 6.6rem;
+  min-height: 7.85rem;
   gap: 0.45rem;
   padding: 0;
 }
@@ -1066,6 +1066,7 @@ button {
   overflow: hidden;
   border-bottom-left-radius: inherit;
   border-bottom-right-radius: inherit;
+  padding-bottom: 0.6rem;
 }
 
 .project-card-menu {
