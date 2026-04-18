@@ -824,6 +824,21 @@ button {
   display: block;
 }
 
+.projects-matrix-char.is-green {
+  color: rgba(125, 232, 168, 0.48);
+  text-shadow: 0 0 10px rgba(125, 232, 168, 0.12);
+}
+
+.projects-matrix-char.is-amber {
+  color: rgba(255, 204, 116, 0.46);
+  text-shadow: 0 0 10px rgba(255, 204, 116, 0.1);
+}
+
+.projects-matrix-char.is-violet {
+  color: rgba(193, 164, 255, 0.44);
+  text-shadow: 0 0 10px rgba(193, 164, 255, 0.1);
+}
+
 .projects-matrix-char.is-bright {
   color: rgba(164, 240, 255, 0.72);
   text-shadow: 0 0 12px rgba(127, 220, 255, 0.22);

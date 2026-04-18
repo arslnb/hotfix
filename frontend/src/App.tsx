@@ -2749,13 +2749,22 @@ function ViewModeIcon(props: { mode: ProjectsView }) {
 }
 
 function ProjectsMatrixBackdrop() {
-  const columnCount = 124;
+  const accentTones = ["green", "amber", "violet"] as const;
+  const columnCount = 248;
   const columns = Array.from({ length: columnCount }, (_, index) => {
     const glyphCount = 22 + (index % 7);
-    const characters = Array.from({ length: glyphCount }, (_, characterIndex) => ({
-      value: matrixGlyphs[Math.floor(Math.random() * matrixGlyphs.length)] ?? "H",
-      bright: characterIndex % 7 === 0,
-    }));
+    const characters = Array.from({ length: glyphCount }, (_, characterIndex) => {
+      const toneRoll = Math.random();
+
+      return {
+        value: matrixGlyphs[Math.floor(Math.random() * matrixGlyphs.length)] ?? "H",
+        bright: characterIndex % 7 === 0,
+        tone:
+          toneRoll > 0.82
+            ? accentTones[Math.floor(Math.random() * accentTones.length)] ?? null
+            : null,
+      };
+    });
 
     return {
       key: `matrix-column-${index}`,
@@ -2763,7 +2772,7 @@ function ProjectsMatrixBackdrop() {
       duration: `${7.5 + (index % 5) * 1.1}s`,
       delay: `${-1 * ((index % 6) * 0.85)}s`,
       opacity: (0.12 + (index % 4) * 0.03).toFixed(2),
-      fontSize: `${9 + (index % 2)}px`,
+      fontSize: `${8 + (index % 2)}px`,
       characters,
     };
   });
@@ -2785,7 +2794,15 @@ function ProjectsMatrixBackdrop() {
             <div class="projects-matrix-track">
               <For each={[...column.characters, ...column.characters]}>
                 {(character) => (
-                  <span class="projects-matrix-char" classList={{ "is-bright": character.bright }}>
+                  <span
+                    class="projects-matrix-char"
+                    classList={{
+                      "is-bright": character.bright,
+                      "is-green": character.tone === "green",
+                      "is-amber": character.tone === "amber",
+                      "is-violet": character.tone === "violet",
+                    }}
+                  >
                     {character.value}
                   </span>
                 )}
