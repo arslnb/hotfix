@@ -13,11 +13,11 @@ import { ProjectHomeGraph } from "./components/ProjectHomeGraph";
 const sentryIcon = new URL("./assets/sentry.svg", import.meta.url).href;
 const githubIcon = new URL("./assets/github.svg", import.meta.url).href;
 const sidebarProjectsIcon = new URL("./assets/sidebar/icons8-project-50.svg", import.meta.url).href;
-const sidebarUsageIcon = new URL("./assets/sidebar/icons8-bar-chart-50.svg", import.meta.url).href;
-const sidebarSettingsIcon = new URL("./assets/sidebar/icons8-automatic-50.svg", import.meta.url).href;
+const sidebarUsageIcon = new URL("./assets/sidebar/icons8-combo-chart-50.svg", import.meta.url).href;
+const sidebarSettingsIcon = new URL("./assets/sidebar/icons8-settings-50.svg", import.meta.url).href;
 const sidebarHomeIcon = new URL("./assets/sidebar/icons8-home-50.svg", import.meta.url).href;
-const sidebarLogsIcon = new URL("./assets/sidebar/icons8-index-50.svg", import.meta.url).href;
-const sidebarIncidentsIcon = new URL("./assets/sidebar/icons8-broken-robot-50.svg", import.meta.url).href;
+const sidebarLogsIcon = new URL("./assets/sidebar/icons8-rfid-signal-50.svg", import.meta.url).href;
+const sidebarIncidentsIcon = new URL("./assets/sidebar/icons8-insect-50.svg", import.meta.url).href;
 const sidebarPerformanceIcon = new URL("./assets/sidebar/icons8-speed-50.svg", import.meta.url).href;
 const brandText = "Hotfix";
 const glyphVariants: Record<string, string[]> = {

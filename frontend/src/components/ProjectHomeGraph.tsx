@@ -10,6 +10,7 @@ import {
 } from "solid-js";
 
 const githubIcon = new URL("../assets/github.svg", import.meta.url).href;
+const connectIcon = new URL("../assets/sidebar/icons8-connect-50.svg", import.meta.url).href;
 
 type ProjectGraphNodeMetadata = {
   githubRepoId?: number;
@@ -803,12 +804,10 @@ async function mountProjectGraphEditor(
                         aria-label=${`Start connection from ${node.label}`}
                       >
                         <span class="project-graph-node-connect-icon" aria-hidden="true">
-                          <svg viewBox="0 0 16 16" fill="none">
-                            <path d="M4.25 8h7.5" />
-                            <path d="M5.5 5.5H3.75v1.75H5.5z" />
-                            <path d="M12.25 8.75h-1.75v1.75h1.75z" />
-                            <path d="M12.25 3.75h-1.75V5.5h1.75z" />
-                          </svg>
+                          <span
+                            class="project-graph-node-connect-icon-mask"
+                            style=${`--connect-icon: url("${connectIcon}")`}
+                          ></span>
                         </span>
                       </button>
                     </div>
