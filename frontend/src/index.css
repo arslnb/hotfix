@@ -793,6 +793,10 @@ button {
   gap: 1.6rem;
 }
 
+.projects-table-wrap {
+  margin-top: -1.6rem;
+}
+
 .projects-top-border {
   position: fixed;
   top: 0;
@@ -873,7 +877,7 @@ button {
   grid-template-columns: var(--projects-table-columns);
   align-items: center;
   column-gap: 0;
-  min-height: 1.6rem;
+  min-height: 1.35rem;
   padding: 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
@@ -888,10 +892,14 @@ button {
   border-left: 1px solid rgba(255, 255, 255, 0.06);
 }
 
+.projects-table-header > *:hover {
+  background: rgba(255, 255, 255, 0.025);
+}
+
 .projects-table-header-button,
 .projects-table-header-label {
   min-width: 0;
-  font-size: 0.69rem;
+  font-size: 0.66rem;
   line-height: 1;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -904,7 +912,7 @@ button {
   justify-content: flex-start;
   gap: 0.28rem;
   height: 100%;
-  padding: 0 0.7rem;
+  padding: 0 0.6rem;
   border: none;
   background: transparent;
   cursor: pointer;
@@ -915,7 +923,6 @@ button {
 
 .projects-table-header-button:hover,
 .projects-table-header-button:focus-visible {
-  background: rgba(255, 255, 255, 0.03);
   color: rgba(242, 238, 227, 0.6);
   outline: none;
 }
@@ -925,7 +932,7 @@ button {
 }
 
 .projects-table-header-label {
-  padding: 0 0.7rem;
+  padding: 0 0.6rem;
 }
 
 .projects-table-header-spacer {
@@ -1184,7 +1191,7 @@ button {
   min-height: 100%;
   display: flex;
   align-items: center;
-  padding: 0 0.7rem;
+  padding: 0 0.6rem;
 }
 
 .project-card-cell:not(:first-child) {
@@ -1243,7 +1250,7 @@ button {
 .project-card.is-table-row:hover,
 .project-card.is-table-row:focus-within,
 .project-card.is-table-row.is-selected {
-  background: #060708;
+  background: #000;
   border-color: transparent;
 }
 
@@ -1414,8 +1421,8 @@ button {
 }
 
 .project-card-stats.is-inline .project-sparkline {
-  width: 2.7rem;
-  height: 0.56rem;
+  width: 1.9rem;
+  height: 0.42rem;
 }
 
 .project-card.is-grid .project-sparkline {

@@ -1606,7 +1606,8 @@ function ProjectsTab(props: {
                 <Show
                   when={viewMode() === "grid"}
                   fallback={
-                    <div class="projects-table">
+                    <div class="projects-table-wrap">
+                      <div class="projects-table">
                       <div class="projects-table-header" role="row">
                         <button
                           class="projects-table-header-button"
@@ -1707,6 +1708,7 @@ function ProjectsTab(props: {
                           )}
                         </For>
                       </div>
+                    </div>
                     </div>
                   }
                 >
