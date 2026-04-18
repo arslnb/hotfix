@@ -12,6 +12,13 @@ import { ProjectHomeGraph } from "./components/ProjectHomeGraph";
 
 const sentryIcon = new URL("./assets/sentry.svg", import.meta.url).href;
 const githubIcon = new URL("./assets/github.svg", import.meta.url).href;
+const sidebarProjectsIcon = new URL("./assets/sidebar/icons8-project-50.svg", import.meta.url).href;
+const sidebarUsageIcon = new URL("./assets/sidebar/icons8-bar-chart-50.svg", import.meta.url).href;
+const sidebarSettingsIcon = new URL("./assets/sidebar/icons8-automatic-50.svg", import.meta.url).href;
+const sidebarHomeIcon = new URL("./assets/sidebar/icons8-home-50.svg", import.meta.url).href;
+const sidebarLogsIcon = new URL("./assets/sidebar/icons8-index-50.svg", import.meta.url).href;
+const sidebarIncidentsIcon = new URL("./assets/sidebar/icons8-broken-robot-50.svg", import.meta.url).href;
+const sidebarPerformanceIcon = new URL("./assets/sidebar/icons8-speed-50.svg", import.meta.url).href;
 const brandText = "Hotfix";
 const glyphVariants: Record<string, string[]> = {
   H: ["H", "#", "4"],
@@ -2494,43 +2501,28 @@ function SettingsTab(props: {
 }
 
 function SidebarIcon(props: { tab: AppTab | ProjectRouteSection }) {
+  const iconSrc = (() => {
+    switch (props.tab) {
+      case "projects":
+        return sidebarProjectsIcon;
+      case "usage":
+        return sidebarUsageIcon;
+      case "settings":
+        return sidebarSettingsIcon;
+      case "home":
+        return sidebarHomeIcon;
+      case "logs":
+        return sidebarLogsIcon;
+      case "incidents":
+        return sidebarIncidentsIcon;
+      case "performance":
+        return sidebarPerformanceIcon;
+    }
+  })();
+
   return (
     <span class="app-sidebar-icon" aria-hidden="true">
-      <Show when={props.tab === "projects"}>
-        <svg viewBox="0 0 16 16" fill="none">
-          <path d="M2.5 3.5h11v3h-11zM2.5 8.5h11v4h-11z" stroke="currentColor" stroke-width="1.2" />
-        </svg>
-      </Show>
-      <Show when={props.tab === "home"}>
-        <svg viewBox="0 0 16 16" fill="none">
-          <path d="M3 7.25 8 3l5 4.25v5.25H9.75v-3H6.25v3H3V7.25Z" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round" />
-        </svg>
-      </Show>
-      <Show when={props.tab === "usage" || props.tab === "performance"}>
-        <svg viewBox="0 0 16 16" fill="none">
-          <path d="M3 11.5V8.25M8 11.5V4.5M13 11.5V6.25" stroke="currentColor" stroke-width="1.2" />
-        </svg>
-      </Show>
-      <Show when={props.tab === "logs"}>
-        <svg viewBox="0 0 16 16" fill="none">
-          <path d="M3 4.25h10M3 8h10M3 11.75h6.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
-        </svg>
-      </Show>
-      <Show when={props.tab === "incidents"}>
-        <svg viewBox="0 0 16 16" fill="none">
-          <path d="M8 2.75 13 12.5H3L8 2.75Z" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round" />
-          <path d="M8 6.1v2.8M8 10.9h.01" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" />
-        </svg>
-      </Show>
-      <Show when={props.tab === "settings"}>
-        <svg viewBox="0 0 16 16" fill="none">
-          <path
-            d="M8 4.75a3.25 3.25 0 1 0 0 6.5 3.25 3.25 0 0 0 0-6.5Zm0-2.25 1 .4.95-.55 1.2 1.2-.55.95.4 1 .95.55v1.7l-.95.55-.4 1 .55.95-1.2 1.2-.95-.55-1 .4-.55.95h-1.7l-.55-.95-1-.4-.95.55-1.2-1.2.55-.95-.4-1-.95-.55v-1.7l.95-.55.4-1-.55-.95 1.2-1.2.95.55 1-.4.55-.95h1.7L8 2.5Z"
-            stroke="currentColor"
-            stroke-width="1"
-          />
-        </svg>
-      </Show>
+      <span class="app-sidebar-icon-mask" style={`--sidebar-icon: url("${iconSrc}")`} />
     </span>
   );
 }

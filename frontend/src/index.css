@@ -316,11 +316,27 @@ button {
   height: 1rem;
   place-items: center;
   flex-shrink: 0;
+  color: inherit;
 }
 
-.app-sidebar-icon svg {
+.app-sidebar-icon-mask {
   width: 100%;
   height: 100%;
+  display: block;
+  background-color: currentColor;
+  opacity: 0.78;
+  -webkit-mask-image: var(--sidebar-icon);
+  mask-image: var(--sidebar-icon);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+}
+
+.app-sidebar-item.is-active .app-sidebar-icon-mask {
+  opacity: 1;
 }
 
 .app-sidebar-label {
