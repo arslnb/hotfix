@@ -965,6 +965,7 @@ button {
 
 .projects-table-header {
   background: transparent;
+  height: 28px;
 }
 
 .projects-table-header th {
@@ -995,12 +996,13 @@ button {
 }
 
 .projects-table-header-button {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: flex-start;
   gap: 0.28rem;
   width: 100%;
   height: 28px;
+  box-sizing: border-box;
   padding: 5px 0.7rem;
   border: none;
   background: transparent;
@@ -1021,7 +1023,7 @@ button {
 }
 
 .projects-table-header-label {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   box-sizing: border-box;
   padding: 5px 0.7rem;
@@ -1071,7 +1073,12 @@ button {
 }
 
 .projects-table-row.is-filler td {
-  background: transparent !important;
+  background: rgba(255, 255, 255, calc(0.008 * var(--filler-opacity, 1))) !important;
+  border-bottom-color: rgba(255, 255, 255, calc(0.05 * var(--filler-opacity, 1)));
+}
+
+.projects-table-row.is-filler td + td {
+  border-left-color: rgba(255, 255, 255, calc(0.06 * var(--filler-opacity, 1)));
 }
 
 .projects-table-cell {
@@ -1090,6 +1097,7 @@ button {
 .projects-table-cell--actions {
   padding: 0;
   width: 2.7rem;
+  text-align: center;
 }
 
 .projects-toolbar-meta {
@@ -1437,15 +1445,10 @@ button {
 }
 
 .project-card-stats.is-inline {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 0.24rem;
+  display: block;
   min-width: 0;
-  flex-shrink: 0;
   width: 100%;
   height: 100%;
-  justify-content: flex-start;
 }
 
 .project-connection-icons {
@@ -1516,6 +1519,7 @@ button {
 
 .projects-table-cell--actions .project-card-menu {
   position: relative;
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1537,6 +1541,7 @@ button {
   transition:
     background-color 150ms ease,
     color 150ms ease;
+  margin-inline: auto;
 }
 
 .project-card-menu-trigger:hover,
@@ -1643,8 +1648,9 @@ button {
 
 .project-card-stats.is-inline .project-sparkline {
   width: 100%;
+  min-width: 100%;
   height: 0.76rem;
-  flex: 1 1 auto;
+  max-width: none;
 }
 
 .project-card.is-grid .project-sparkline {

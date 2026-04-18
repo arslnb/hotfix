@@ -1689,14 +1689,13 @@ function ProjectsTab(props: {
                             <col class="projects-table-col projects-table-col--activity" />
                             <col class="projects-table-col projects-table-col--actions" />
                           </colgroup>
-                          <thead>
-                            <tr class="projects-table-header">
-                              <th
-                                class="projects-table-header-label projects-table-header-label--index"
-                                scope="col"
-                              >
-                                #
-                              </th>
+                            <thead>
+                              <tr class="projects-table-header">
+                                <th scope="col">
+                                  <div class="projects-table-header-label projects-table-header-label--index">
+                                    #
+                                  </div>
+                                </th>
                               <th scope="col">
                                 <button
                                   class="projects-table-header-button"
@@ -1707,9 +1706,9 @@ function ProjectsTab(props: {
                                   <span>Name</span>
                                 </button>
                               </th>
-                              <th class="projects-table-header-label" scope="col">
-                                Health
-                              </th>
+                                <th scope="col">
+                                  <div class="projects-table-header-label">Health</div>
+                                </th>
                               <th scope="col">
                                 <button
                                   class="projects-table-header-button"
@@ -1750,12 +1749,14 @@ function ProjectsTab(props: {
                                   <span>Created at</span>
                                 </button>
                               </th>
-                              <th class="projects-table-header-label" scope="col">
-                                Activity
-                              </th>
-                              <th class="projects-table-header-spacer" scope="col" aria-hidden="true" />
-                            </tr>
-                          </thead>
+                                <th scope="col">
+                                  <div class="projects-table-header-label">Activity</div>
+                                </th>
+                                <th scope="col" aria-hidden="true">
+                                  <div class="projects-table-header-spacer" />
+                                </th>
+                              </tr>
+                            </thead>
 
                           <tbody class="projects-table-body">
                             <For each={sortedProjects()}>
@@ -1901,7 +1902,7 @@ function ProjectsTab(props: {
                                   class="projects-table-row is-filler"
                                   aria-hidden="true"
                                   style={{
-                                    opacity: `${Math.max(
+                                    "--filler-opacity": `${Math.max(
                                       0,
                                       1 - (index + 1) / Math.max(tableFillerRows(), 1),
                                     )}`,
@@ -2264,34 +2265,35 @@ function ProjectsHomeSkeleton(props: { viewMode: ProjectsView }) {
                 </colgroup>
                 <thead>
                   <tr class="projects-table-header is-skeleton">
-                    <th
-                      class="projects-table-header-label projects-table-header-label--index"
-                      scope="col"
-                    >
-                      #
+                    <th scope="col">
+                      <div class="projects-table-header-label projects-table-header-label--index">
+                        #
+                      </div>
                     </th>
-                    <th class="projects-table-header-label" scope="col">
-                      Name
+                    <th scope="col">
+                      <div class="projects-table-header-label">Name</div>
                     </th>
-                    <th class="projects-table-header-label" scope="col">
-                      Health
+                    <th scope="col">
+                      <div class="projects-table-header-label">Health</div>
                     </th>
-                    <th class="projects-table-header-label" scope="col">
-                      Indexing
+                    <th scope="col">
+                      <div class="projects-table-header-label">Indexing</div>
                     </th>
-                    <th class="projects-table-header-label" scope="col">
-                      Incidents
+                    <th scope="col">
+                      <div class="projects-table-header-label">Incidents</div>
                     </th>
-                    <th class="projects-table-header-label" scope="col">
-                      Last activity
+                    <th scope="col">
+                      <div class="projects-table-header-label">Last activity</div>
                     </th>
-                    <th class="projects-table-header-label" scope="col">
-                      Created at
+                    <th scope="col">
+                      <div class="projects-table-header-label">Created at</div>
                     </th>
-                    <th class="projects-table-header-label" scope="col">
-                      Activity
+                    <th scope="col">
+                      <div class="projects-table-header-label">Activity</div>
                     </th>
-                    <th class="projects-table-header-spacer" scope="col" aria-hidden="true" />
+                    <th scope="col" aria-hidden="true">
+                      <div class="projects-table-header-spacer" />
+                    </th>
                   </tr>
                 </thead>
                 <tbody class="projects-table-body is-skeleton">
