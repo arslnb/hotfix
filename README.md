@@ -31,20 +31,35 @@ Solid + Vite+ frontend, Axum + Postgres backend, and server-side OAuth sessions 
 
 ## Run in development
 
-Backend:
+Migrations are applied automatically when the API backend starts via `sqlx::migrate!()`. In practice, running the backend once is your migration step.
+
+Run the full local stack:
 
 ```bash
-cargo run --manifest-path backend/Cargo.toml
+make dev
 ```
 
-Frontend:
+That starts:
+
+- the mock sandbox on `127.0.0.1:4001`
+- the API backend on `127.0.0.1:3000`
+- the frontend dev server
+
+You can also run pieces individually:
 
 ```bash
-cd frontend
-vp dev
+make dev-api
+make dev-sandbox
+make dev-frontend
 ```
 
 The frontend proxies `/api` to `VITE_API_PROXY_TARGET`, which defaults to `http://127.0.0.1:3000`.
+
+Stop the local processes with:
+
+```bash
+make stop
+```
 
 ## Production-style build
 
