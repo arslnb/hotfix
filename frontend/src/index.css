@@ -873,6 +873,11 @@ button {
   height: 30px;
   border-top: 1px solid rgba(118, 170, 186, 0.24);
   border-bottom: 1px solid rgba(118, 170, 186, 0.24);
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(118, 170, 186, 0.24) 0 1px,
+    transparent 1px 8px
+  );
   pointer-events: none;
   z-index: 8;
 }
