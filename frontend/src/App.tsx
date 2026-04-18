@@ -897,9 +897,10 @@ function ProjectsTab(props: {
       const rect = gridFrame.getBoundingClientRect();
       const remainingHeight = Math.max(0, window.innerHeight - rect.top - 32);
       const visibleRows = Math.max(1, Math.ceil(remainingHeight / PROJECTS_GRID_ROW_HEIGHT) - 2);
-      const visibleCells = visibleRows * PROJECTS_GRID_COLUMNS;
       const totalGridItems = sortedProjects().length + 1;
-      const fillerCount = Math.max(0, visibleCells - totalGridItems);
+      const occupiedRows = Math.ceil(totalGridItems / PROJECTS_GRID_COLUMNS);
+      const fillerRows = Math.max(0, visibleRows - occupiedRows);
+      const fillerCount = fillerRows * PROJECTS_GRID_COLUMNS;
       setGridFillerCells(Math.min(fillerCount, 72));
       return;
     }
@@ -1595,6 +1596,7 @@ function ProjectsTab(props: {
           </Show>
           <Show when={!openedProject()}>
             <div class="projects-home-surface">
+              <div class="projects-top-band" aria-hidden="true" />
               <div class="projects-guide-frame">
               <div class="projects-header-block">
                 <div class="projects-header">
@@ -2346,6 +2348,7 @@ function ProjectsHomeSkeleton(props: { viewMode: ProjectsView }) {
 
   return (
     <div class="projects-home-surface is-skeleton" aria-hidden="true">
+      <div class="projects-top-band" aria-hidden="true" />
       <div class="projects-guide-frame">
       <div class="projects-header-block">
         <div class="projects-header">
