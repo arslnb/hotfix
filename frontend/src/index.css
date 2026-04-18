@@ -959,6 +959,7 @@ button {
 }
 
 .project-card.is-grid .project-card-main {
+  position: relative;
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
@@ -1058,15 +1059,17 @@ button {
 }
 
 .project-card.is-grid .project-card-stats {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0.6rem;
   align-items: stretch;
   gap: 0;
-  margin-top: auto;
   min-width: 0;
-  width: 100%;
+  width: auto;
   overflow: hidden;
   border-bottom-left-radius: inherit;
   border-bottom-right-radius: inherit;
-  padding-bottom: 0.6rem;
 }
 
 .project-card-menu {
