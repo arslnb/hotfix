@@ -200,7 +200,7 @@ button {
   flex-basis: 4rem;
   width: 4rem;
   min-width: 4rem;
-  padding: 0.95rem 0.55rem 0.9rem;
+  padding: 0.45rem 0.55rem 0.9rem;
 }
 
 .app-sidebar-brand {
@@ -372,6 +372,9 @@ button {
 }
 
 .app-sidebar.is-collapsed .app-sidebar-item {
+  width: 2.25rem;
+  height: 2.25rem;
+  align-self: center;
   justify-content: center;
   padding: 0;
 }
