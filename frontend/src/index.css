@@ -873,7 +873,7 @@ button {
   align-items: center;
   column-gap: 0;
   min-height: 2rem;
-  padding: 0 2.7rem 0 0.82rem;
+  padding: 0 2.7rem 0 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -883,7 +883,6 @@ button {
 
 .projects-table-header > *:not(:first-child) {
   border-left: 1px solid rgba(255, 255, 255, 0.06);
-  padding-left: 0.95rem;
 }
 
 .projects-table-header-button,
@@ -1118,7 +1117,7 @@ button {
   height: 44px;
   min-height: 44px;
   gap: 0.95rem;
-  padding: 0.3rem 2.7rem 0.3rem 0.82rem;
+  padding: 0.3rem 2.7rem 0.3rem 0;
 }
 
 .project-card.is-table-row .project-card-main {
@@ -1170,7 +1169,6 @@ button {
 
 .project-card-cell:not(:first-child) {
   border-left: 1px solid rgba(255, 255, 255, 0.06);
-  padding-left: 0.95rem;
 }
 
 .project-card-cell--activity {
