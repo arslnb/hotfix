@@ -516,7 +516,7 @@ button {
 .logged-in-panel {
   min-height: 100%;
   background: transparent;
-  padding: 100px clamp(8rem, 18vw, 15rem) 2rem;
+  padding: 200px clamp(8rem, 18vw, 15rem) 2rem;
 }
 
 .logged-in-panel.is-project-open {
@@ -637,7 +637,7 @@ button {
   height: 32px;
   padding: 0;
   border: none;
-  border-radius: 8px;
+  border-radius: 4px;
   background: rgba(255, 255, 255, 0.05);
   color: var(--text-primary);
   cursor: pointer;
@@ -2834,7 +2834,7 @@ button {
   }
 
   .logged-in-panel {
-    padding: 100px 1.5rem 1.25rem;
+    padding: 200px 1.5rem 1.25rem;
   }
 
   .project-page-header-shell {
