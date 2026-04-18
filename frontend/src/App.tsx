@@ -1457,11 +1457,21 @@ function ProjectsTab(props: {
             <div class="projects-home-surface">
               <div class="projects-header">
                 <div class="projects-header-copy">
-                  <h1 class="projects-title">Projects</h1>
+                  <h1 class="projects-title">Map Your Software Surface</h1>
+                  <p class="projects-subtitle">
+                    Create a project, connect the systems behind it, and build a clear operating view of how your code,
+                    telemetry, and incidents fit together.
+                  </p>
+                  <div class="projects-header-rule" aria-hidden="true" />
                 </div>
 
                 <div class="projects-header-actions">
-                  <button class="brand-button" type="button" onClick={openCreateModal} disabled={dashboard.loading}>
+                  <button
+                    class="brand-button is-inverted"
+                    type="button"
+                    onClick={openCreateModal}
+                    disabled={dashboard.loading}
+                  >
                     <span class="brand-button-plus" aria-hidden="true">
                       +
                     </span>

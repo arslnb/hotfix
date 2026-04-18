@@ -587,7 +587,25 @@ button {
   transition:
     transform 110ms ease,
     filter 150ms ease,
-    background-color 150ms ease;
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease;
+}
+
+.brand-button.is-inverted {
+  border: 1px solid rgba(127, 220, 255, 0.52);
+  background: rgba(7, 9, 10, 0.92);
+  color: rgba(164, 240, 255, 0.92);
+}
+
+.brand-button.is-inverted:hover {
+  background: rgba(11, 15, 18, 0.98);
+  color: rgba(197, 245, 255, 0.96);
+}
+
+.brand-button.is-inverted .brand-button-shortcut {
+  background: rgba(127, 220, 255, 0.12);
+  color: rgba(164, 240, 255, 0.9);
 }
 
 .brand-button:hover {
@@ -839,6 +857,13 @@ button {
   gap: 1rem;
 }
 
+.projects-header-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.58rem;
+  max-width: 39rem;
+}
+
 .projects-header-actions {
   position: relative;
   display: inline-flex;
@@ -848,10 +873,24 @@ button {
 
 .projects-title {
   margin: 0;
-  font-size: 1.62rem;
+  font-size: 1.72rem;
   font-weight: 500;
   letter-spacing: -0.04em;
   color: var(--text-primary);
+}
+
+.projects-subtitle {
+  margin: 0;
+  max-width: 34rem;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: rgba(242, 238, 227, 0.46);
+}
+
+.projects-header-rule {
+  width: min(100%, 22rem);
+  height: 1px;
+  background: linear-gradient(90deg, rgba(127, 220, 255, 0.42), rgba(127, 220, 255, 0.08) 64%, transparent);
 }
 
 .projects-toolbar {
@@ -1026,6 +1065,11 @@ button {
   min-height: 7.85rem;
 }
 
+.project-card.is-grid:not(.is-selected) {
+  background: #0d0f11;
+  filter: grayscale(1) saturate(0.12) brightness(0.92);
+}
+
 .project-card:not(.is-grid) {
   border-radius: 0;
 }
@@ -1056,6 +1100,7 @@ button {
 .project-card.is-selected {
   background: #060708;
   border-color: rgba(127, 220, 255, 0.45);
+  filter: none;
 }
 
 .project-card-main:focus-visible {
