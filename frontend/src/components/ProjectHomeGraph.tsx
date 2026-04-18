@@ -9,12 +9,21 @@ import {
   untrack,
 } from "solid-js";
 
-const sentryIcon = new URL("../assets/sentry.svg", import.meta.url).href;
+const githubIcon = new URL("../assets/github.svg", import.meta.url).href;
 
 type ProjectGraphNodeMetadata = {
-  provider?: string;
+  githubRepoId?: number;
+  githubRepoFullName?: string | null;
+  githubRepoUrl?: string | null;
+  githubRepoDefaultBranch?: string | null;
+  baseDirectory?: string | null;
+  indexingStatus?: string | null;
+  indexingPercentage?: number;
   sentryProjectId?: string;
   slug?: string;
+  linkedSentryProjectName?: string | null;
+  linkedSentryProjectSlug?: string | null;
+  linkedSentryProjectPlatform?: string | null;
   platform?: string | null;
   included?: boolean;
   errors24h?: number;
@@ -25,8 +34,6 @@ type ProjectGraphNodeMetadata = {
   profiles24h?: number;
   sentryRepoConnected?: boolean;
   hotfixRepoConnected?: boolean;
-  githubRepoFullName?: string | null;
-  githubRepoUrl?: string | null;
 };
 
 type ProjectGraphNode = {
@@ -115,6 +122,31 @@ type CreateProjectGraphEdgeInput = {
   contextNotInCode: string;
 };
 
+type CreateProjectGraphItemInput = {
+  name: string;
+  description: string;
+  githubRepoId: number;
+  baseDirectory: string;
+  linkedImportedSentryProjectId: string | null;
+};
+
+type GitHubRepositoryPayload = {
+  id: number;
+  fullName: string;
+  htmlUrl: string;
+  defaultBranch: string | null;
+  private: boolean;
+};
+
+type ImportedSentryProjectSummary = {
+  id: string;
+  sentryProjectId: string;
+  slug: string;
+  name: string;
+  platform: string | null;
+  included: boolean;
+};
+
 type GraphVisualState = {
   selectedNodeId: string | null;
   linkSourceNodeId: string | null;
@@ -125,6 +157,7 @@ type EdgeDraft = CreateProjectGraphEdgeInput;
 type ProjectHomeGraphProps = {
   projectId: string;
   refreshKey: string;
+  sentryProjects: ImportedSentryProjectSummary[];
 };
 
 const GRAPH_CARD_WIDTH = 248;
@@ -203,20 +236,65 @@ async function createProjectGraphEdge(projectId: string, input: CreateProjectGra
   });
 }
 
+async function fetchGitHubRepositories() {
+  return fetchJson<GitHubRepositoryPayload[]>("/api/github/repositories", {
+    headers: {
+      Accept: "application/json",
+    },
+  });
+}
+
+async function createProjectGraphItem(projectId: string, input: CreateProjectGraphItemInput) {
+  return fetchJson<ProjectGraphPayload>(`/api/hotfix-projects/${projectId}/graph/items`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+}
+
 function nodeSubtitle(node: ProjectGraphNode) {
-  return node.metadata.slug ?? node.description ?? "Imported from Sentry";
+  return node.description ?? node.metadata.linkedSentryProjectSlug ?? "No description";
 }
 
 function nodeFooter(node: ProjectGraphNode) {
-  return node.metadata.platform ?? "Sentry project";
+  if (node.metadata.baseDirectory) {
+    return `${node.metadata.githubRepoFullName ?? "GitHub repo"} · ${node.metadata.baseDirectory}`;
+  }
+
+  return node.metadata.githubRepoFullName ?? "GitHub repository";
 }
 
 function nodeStatus(node: ProjectGraphNode) {
-  return node.metadata.included === false ? "Excluded" : "Included";
+  const indexingStatus = (node.metadata.indexingStatus ?? "pending").toLowerCase();
+  const percentage = Math.max(0, Math.min(100, Number(node.metadata.indexingPercentage ?? 0)));
+
+  if (indexingStatus === "indexed" || indexingStatus === "ready" || percentage >= 100) {
+    return "Indexed";
+  }
+
+  if (indexingStatus === "indexing" || percentage > 0) {
+    return `Indexing ${percentage}%`;
+  }
+
+  if (indexingStatus === "failed") {
+    return "Indexing failed";
+  }
+
+  return "Queued for indexing";
 }
 
 function nodeStatusClass(node: ProjectGraphNode) {
-  return node.metadata.included === false ? "is-muted" : "is-online";
+  const indexingStatus = (node.metadata.indexingStatus ?? "pending").toLowerCase();
+  if (indexingStatus === "failed") {
+    return "is-muted";
+  }
+  if (indexingStatus === "indexed" || indexingStatus === "ready") {
+    return "is-online";
+  }
+  return "is-pending";
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -567,20 +645,28 @@ function normalizeGraphLayout(graph: ProjectGraphPayload) {
 function panelFacts(node: ProjectGraphNode) {
   return [
     {
+      label: "GitHub repo",
+      value: node.metadata.githubRepoFullName ?? "Not connected",
+    },
+    {
+      label: "Base directory",
+      value: node.metadata.baseDirectory ?? "Repository root",
+    },
+    {
+      label: "Indexing",
+      value: nodeStatus(node),
+    },
+    {
+      label: "Linked Sentry project",
+      value: node.metadata.linkedSentryProjectName ?? "Not connected",
+    },
+    {
       label: "24h errors",
       value: formatMetricCount(node.metadata.errors24h),
     },
     {
       label: "24h transactions",
       value: formatMetricCount(node.metadata.transactions24h),
-    },
-    {
-      label: "Platform",
-      value: node.metadata.platform ?? "Not reported",
-    },
-    {
-      label: "Included",
-      value: nodeStatus(node),
     },
     {
       label: "Sentry repo",
@@ -686,7 +772,7 @@ async function mountProjectGraphEditor(
                   <div class="project-graph-node-card-top">
                     <div class="project-graph-node-card-header">
                       <span class="project-graph-node-card-icon" aria-hidden="true">
-                        <img src=${sentryIcon} alt="" />
+                        <img src=${githubIcon} alt="" />
                       </span>
                       <div class="project-graph-node-card-copy">
                         <p class="project-graph-node-card-title">${node.label}</p>
@@ -737,14 +823,14 @@ async function mountProjectGraphEditor(
 
                   <div class="project-graph-node-card-badges">
                     <span
-                      class=${nodeConnectionBadgeClass(Boolean(node.metadata.sentryRepoConnected))}
+                      class=${nodeConnectionBadgeClass(Boolean(node.importedSentryProjectId))}
                     >
-                      ${node.metadata.sentryRepoConnected ? "Sentry linked" : "Sentry missing"}
+                      ${node.importedSentryProjectId ? "Sentry linked" : "Sentry missing"}
                     </span>
                     <span
                       class=${nodeConnectionBadgeClass(Boolean(node.metadata.hotfixRepoConnected))}
                     >
-                      ${node.metadata.hotfixRepoConnected ? "Hotfix linked" : "Hotfix missing"}
+                      ${node.metadata.hotfixRepoConnected ? "GitHub linked" : "GitHub missing"}
                     </span>
                   </div>
                 </div>
@@ -1134,7 +1220,7 @@ function ProjectNodePanel(props: {
       <header class="project-node-panel-header">
         <div class="project-node-panel-heading">
           <span class="project-node-panel-icon" aria-hidden="true">
-            <img src={sentryIcon} alt="" />
+            <img src={githubIcon} alt="" />
           </span>
           <div class="project-node-panel-copy">
             <h2 class="project-node-panel-title">{props.node.label}</h2>
@@ -1164,6 +1250,12 @@ function ProjectNodePanel(props: {
             <p class="project-node-panel-section-title">Recent errors & events</p>
             <span class="project-node-panel-badge">24h</span>
           </div>
+
+          <Show when={!props.node.importedSentryProjectId}>
+            <p class="project-node-panel-copyline">
+              This item is not linked to a Sentry project yet. Connect one from the item modal or project settings.
+            </p>
+          </Show>
 
           <Show when={activity.loading}>
             <p class="project-node-panel-copyline">Loading Sentry activity…</p>
@@ -1208,6 +1300,12 @@ function ProjectNodePanel(props: {
             <p class="project-node-panel-section-title">Transaction activity</p>
             <span class="project-node-panel-badge">Esc closes</span>
           </div>
+
+          <Show when={!props.node.importedSentryProjectId}>
+            <p class="project-node-panel-copyline">
+              Link a Sentry project to this item if you want Hotfix to surface its transactions here.
+            </p>
+          </Show>
 
           <Show when={activity.loading}>
             <p class="project-node-panel-copyline">Loading Sentry transactions…</p>
@@ -1413,11 +1511,201 @@ function EdgeCreationModal(props: {
   );
 }
 
+function AddProjectItemModal(props: {
+  githubRepos: GitHubRepositoryPayload[];
+  sentryProjects: ImportedSentryProjectSummary[];
+  saving: boolean;
+  error: string | null;
+  githubLoading: boolean;
+  githubError: string | null;
+  onClose: () => void;
+  onSubmit: (input: CreateProjectGraphItemInput) => void;
+}) {
+  const [name, setName] = createSignal("");
+  const [description, setDescription] = createSignal("");
+  const [githubRepoId, setGitHubRepoId] = createSignal("");
+  const [baseDirectory, setBaseDirectory] = createSignal("");
+  const [linkedImportedSentryProjectId, setLinkedImportedSentryProjectId] = createSignal("");
+
+  const canSubmit = createMemo(
+    () => !props.saving && name().trim().length > 0 && githubRepoId().trim().length > 0,
+  );
+
+  return (
+    <div class="project-modal-backdrop project-edge-modal-backdrop" role="presentation" onClick={props.onClose}>
+      <section
+        class="project-modal project-edge-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="project-item-modal-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div class="project-modal-header">
+          <div>
+            <h2 id="project-item-modal-title" class="project-modal-title">
+              Add an item to the canvas
+            </h2>
+            <p class="project-edge-modal-copy">
+              Create a repo-backed item, optionally attach one imported Sentry project, and let Hotfix track indexing state on it.
+            </p>
+          </div>
+          <button class="project-modal-close" type="button" onClick={props.onClose} aria-label="Close">
+            ×
+          </button>
+        </div>
+
+        <form
+          class="project-modal-form project-edge-modal-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!canSubmit()) {
+              return;
+            }
+            props.onSubmit({
+              name: name().trim(),
+              description: description(),
+              githubRepoId: Number(githubRepoId()),
+              baseDirectory: baseDirectory(),
+              linkedImportedSentryProjectId:
+                linkedImportedSentryProjectId().trim().length > 0
+                  ? linkedImportedSentryProjectId()
+                  : null,
+            });
+          }}
+        >
+          <label class="project-field">
+            <span class="project-field-label">Name</span>
+            <input
+              class="project-field-input"
+              type="text"
+              value={name()}
+              placeholder="Frontend app"
+              maxlength={120}
+              onInput={(event) => setName(event.currentTarget.value)}
+            />
+          </label>
+
+          <label class="project-field">
+            <span class="project-field-label">GitHub repository</span>
+            <Show
+              when={props.githubRepos.length > 0}
+              fallback={
+                <p class="project-field-helper">
+                  {props.githubLoading ? (
+                    "Loading connected GitHub repositories..."
+                  ) : props.githubError ? (
+                    <>
+                      <a class="project-inline-link" href="/api/auth/github/start">
+                        Connect GitHub
+                      </a>{" "}
+                      to pick a repository for this item.
+                    </>
+                  ) : (
+                    "No connected GitHub repositories are available for this account."
+                  )}
+                </p>
+              }
+            >
+              <div class="projects-select-wrap">
+                <select
+                  class="project-field-input project-field-select"
+                  value={githubRepoId()}
+                  onInput={(event) => setGitHubRepoId(event.currentTarget.value)}
+                >
+                  <option value="">Select a repository</option>
+                  <For each={props.githubRepos}>
+                    {(repo) => <option value={repo.id}>{repo.fullName}</option>}
+                  </For>
+                </select>
+                <span class="projects-select-caret" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" fill="none">
+                    <path d="m4.25 6.25 3.75 3.75 3.75-3.75" stroke="currentColor" stroke-width="1.15" />
+                  </svg>
+                </span>
+              </div>
+            </Show>
+          </label>
+
+          <label class="project-field">
+            <span class="project-field-label">Description</span>
+            <textarea
+              class="project-field-textarea project-edge-modal-textarea"
+              rows={3}
+              value={description()}
+              placeholder="Optional context about the role of this codebase or service."
+              onInput={(event) => setDescription(event.currentTarget.value)}
+            />
+          </label>
+
+          <label class="project-field">
+            <span class="project-field-label">Base directory</span>
+            <input
+              class="project-field-input"
+              type="text"
+              value={baseDirectory()}
+              placeholder="apps/web"
+              onInput={(event) => setBaseDirectory(event.currentTarget.value)}
+            />
+            <p class="project-field-helper">
+              Optional. Use this when the repository is a monorepo and this item lives below the repository root.
+            </p>
+          </label>
+
+          <label class="project-field">
+            <span class="project-field-label">Linked Sentry project</span>
+            <div class="projects-select-wrap" classList={{ "is-disabled": props.sentryProjects.length === 0 }}>
+              <select
+                class="project-field-input project-field-select"
+                value={linkedImportedSentryProjectId()}
+                onInput={(event) => setLinkedImportedSentryProjectId(event.currentTarget.value)}
+                disabled={props.sentryProjects.length === 0}
+              >
+                <option value="">None</option>
+                <For each={props.sentryProjects}>
+                  {(project) => (
+                    <option value={project.id}>
+                      {project.name} ({project.slug})
+                    </option>
+                  )}
+                </For>
+              </select>
+              <span class="projects-select-caret" aria-hidden="true">
+                <svg viewBox="0 0 16 16" fill="none">
+                  <path d="m4.25 6.25 3.75 3.75 3.75-3.75" stroke="currentColor" stroke-width="1.15" />
+                </svg>
+              </span>
+            </div>
+            <p class="project-field-helper">
+              Optional. Import Sentry projects in Settings first if you want this item to show Sentry activity and metrics.
+            </p>
+          </label>
+
+          <Show when={props.error}>
+            {(message) => <p class="project-modal-error">{message()}</p>}
+          </Show>
+
+          <div class="project-modal-actions">
+            <button class="project-modal-secondary" type="button" onClick={props.onClose}>
+              Cancel
+            </button>
+            <button class="brand-button" type="submit" disabled={!canSubmit()}>
+              {props.saving ? "Adding..." : "Add item"}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
   const [graph, { mutate }] = createResource(
     () => `${props.projectId}:${props.refreshKey}`,
     async () => fetchProjectGraph(props.projectId),
   );
+  const [itemModalOpen, setItemModalOpen] = createSignal(false);
+  const [itemSaveError, setItemSaveError] = createSignal<string | null>(null);
+  const [itemSaving, setItemSaving] = createSignal(false);
   const [selectedNodeId, setSelectedNodeId] = createSignal<string | null>(null);
   const [linkSourceNodeId, setLinkSourceNodeId] = createSignal<string | null>(null);
   const [linkPreviewPoint, setLinkPreviewPoint] = createSignal<{ x: number; y: number } | null>(null);
@@ -1428,6 +1716,10 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
   let editorHandle: EditorHandle | null = null;
   let buildToken = 0;
   let lastPersistedLayout = "";
+  const [githubRepos] = createResource(
+    () => (itemModalOpen() ? props.projectId : null),
+    async () => fetchGitHubRepositories(),
+  );
 
   const selectedNode = createMemo(
     () => graph()?.nodes.find((node) => node.id === selectedNodeId()) ?? null,
@@ -1514,6 +1806,14 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
     resetEdgeComposerState();
   };
 
+  const closeItemModal = () => {
+    if (itemSaving()) {
+      return;
+    }
+    setItemModalOpen(false);
+    setItemSaveError(null);
+  };
+
   const armLinkSource = (nodeId: string) => {
     if (linkSourceNodeId() === nodeId) {
       clearLinkSourceSelection();
@@ -1598,6 +1898,23 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
       setEdgeSaveError(message);
     } finally {
       setEdgeSaving(false);
+    }
+  };
+
+  const handleItemCreate = async (input: CreateProjectGraphItemInput) => {
+    setItemSaving(true);
+    setItemSaveError(null);
+
+    try {
+      const payload = await createProjectGraphItem(props.projectId, input);
+      mutate(payload);
+      setItemModalOpen(false);
+      setSelectedNodeId(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not add the item to the canvas.";
+      setItemSaveError(message);
+    } finally {
+      setItemSaving(false);
     }
   };
 
@@ -1821,6 +2138,22 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
           </div>
         </Show>
 
+        <div class="project-home-actions">
+          <button
+            class="brand-button"
+            type="button"
+            onClick={() => {
+              setItemSaveError(null);
+              setItemModalOpen(true);
+            }}
+          >
+            <span class="brand-button-plus" aria-hidden="true">
+              +
+            </span>
+            <span>Add</span>
+          </button>
+        </div>
+
         <GraphControls
           onReorganize={() => void reorganizeGraph()}
           onZoomIn={() => void editorHandle?.zoomBy(1.12)}
@@ -1855,14 +2188,27 @@ export function ProjectHomeGraph(props: ProjectHomeGraphProps) {
         <Show when={isEmpty()}>
           <div class="project-home-overlay">
             <div class="project-home-status">
-              <p class="project-home-status-label">No Sentry graph yet</p>
+              <p class="project-home-status-label">No canvas items yet</p>
               <p class="project-home-status-copy">
-                Connect a Sentry organization or refresh imported projects to populate this canvas.
+                Add your first repo-backed item, then optionally link one imported Sentry project to it.
               </p>
             </div>
           </div>
         </Show>
       </div>
+
+      <Show when={itemModalOpen()}>
+        <AddProjectItemModal
+          githubRepos={githubRepos() ?? []}
+          sentryProjects={props.sentryProjects}
+          saving={itemSaving()}
+          error={itemSaveError()}
+          githubLoading={githubRepos.loading}
+          githubError={githubRepos.error ? (githubRepos.error instanceof Error ? githubRepos.error.message : "GitHub is unavailable.") : null}
+          onClose={closeItemModal}
+          onSubmit={(input) => void handleItemCreate(input)}
+        />
+      </Show>
 
       <Show when={edgeComposerState()} keyed>
         {(state) => (

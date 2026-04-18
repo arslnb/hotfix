@@ -693,6 +693,16 @@ struct CreateProjectGraphEdgeInput {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct CreateProjectGraphItemInput {
+    name: String,
+    description: Option<String>,
+    github_repo_id: i64,
+    base_directory: Option<String>,
+    linked_imported_sentry_project_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ProjectGraphNodeLayoutInput {
     id: Uuid,
     position_x: f64,
@@ -740,6 +750,25 @@ struct ProjectGraphNodeRow {
     description: Option<String>,
     position_x: f64,
     position_y: f64,
+    github_repo_id: Option<i64>,
+    github_repo_full_name: Option<String>,
+    github_repo_url: Option<String>,
+    github_repo_default_branch: Option<String>,
+    base_directory: Option<String>,
+    indexing_status: String,
+    indexing_percentage: i32,
+    linked_sentry_project_id: Option<String>,
+    linked_sentry_project_slug: Option<String>,
+    linked_sentry_project_name: Option<String>,
+    linked_sentry_project_platform: Option<String>,
+    linked_sentry_project_included: Option<bool>,
+    linked_sentry_errors_24h: Option<i64>,
+    linked_sentry_transactions_24h: Option<i64>,
+    linked_sentry_replays_24h: Option<i64>,
+    linked_sentry_profiles_24h: Option<i64>,
+    linked_sentry_errors_24h_series: Option<SqlJson<Vec<i64>>>,
+    linked_sentry_transactions_24h_series: Option<SqlJson<Vec<i64>>>,
+    linked_sentry_repo_connected: Option<bool>,
     metadata: SqlJson<JsonValue>,
     is_system: bool,
 }
@@ -754,13 +783,6 @@ struct ProjectGraphEdgeRow {
     label: Option<String>,
     metadata: SqlJson<JsonValue>,
     is_system: bool,
-}
-
-#[derive(Debug, FromRow)]
-struct ExistingGraphNodePositionRow {
-    node_key: String,
-    position_x: f64,
-    position_y: f64,
 }
 
 #[derive(Debug, FromRow)]
@@ -843,25 +865,6 @@ struct SentryIssueCodeRefRow {
     confidence: f64,
     source: String,
     metadata: SqlJson<JsonValue>,
-}
-
-#[derive(Debug, FromRow)]
-struct GraphImportedProjectRow {
-    id: Uuid,
-    sentry_project_id: String,
-    slug: String,
-    name: String,
-    platform: Option<String>,
-    included: bool,
-    errors_24h: i64,
-    transactions_24h: i64,
-    replays_24h: i64,
-    profiles_24h: i64,
-    errors_24h_series: SqlJson<Vec<i64>>,
-    transactions_24h_series: SqlJson<Vec<i64>>,
-    sentry_repo_connected: bool,
-    github_repo_full_name: Option<String>,
-    github_repo_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1166,6 +1169,10 @@ async fn main() -> Result<(), AppError> {
         .route(
             "/hotfix-projects/{project_id}/graph",
             get(get_project_graph),
+        )
+        .route(
+            "/hotfix-projects/{project_id}/graph/items",
+            post(create_project_graph_item),
         )
         .route(
             "/hotfix-projects/{project_id}/graph/edges",
@@ -1550,10 +1557,124 @@ async fn get_project_graph(
 ) -> Result<Json<ProjectGraphPayload>, AppError> {
     let user_id = require_user_id(&session).await?;
     ensure_hotfix_project_owner(&state.db, user_id, project_id).await?;
-
     let mut tx = state.db.begin().await?;
     sync_hotfix_project_graph(&mut tx, project_id).await?;
     tx.commit().await?;
+    let payload = build_project_graph_payload(&state.db, project_id).await?;
+    Ok(Json(payload))
+}
+
+async fn create_project_graph_item(
+    State(state): State<AppState>,
+    session: Session,
+    AxumPath(project_id): AxumPath<Uuid>,
+    Json(input): Json<CreateProjectGraphItemInput>,
+) -> Result<Json<ProjectGraphPayload>, AppError> {
+    let user_id = require_user_id(&session).await?;
+    ensure_hotfix_project_owner(&state.db, user_id, project_id).await?;
+
+    let name = input.name.trim();
+    if name.is_empty() {
+        return Err(AppError::BadRequest("Item name cannot be empty.".into()));
+    }
+
+    let description = input
+        .description
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let base_directory = input
+        .base_directory
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+
+    let github_connection = load_provider_connection(&state.db, user_id, Provider::GitHub).await?;
+    let github_access_token = decrypt_provider_token(
+        &state.config.session_secret,
+        &github_connection.access_token_nonce,
+        &github_connection.access_token_ciphertext,
+    )?;
+    let github_repositories = fetch_all_github_repositories(&state, &github_access_token).await?;
+    let github_repo = github_repositories
+        .into_iter()
+        .find(|repo| repo.id == input.github_repo_id)
+        .ok_or_else(|| {
+            AppError::BadRequest("Select a GitHub repository connected to this account.".into())
+        })?;
+
+    if let Some(imported_project_id) = input.linked_imported_sentry_project_id {
+        let owner_project_id =
+            load_imported_project_owner(&state.db, user_id, imported_project_id).await?;
+        if owner_project_id != project_id {
+            return Err(AppError::BadRequest(
+                "The selected Sentry project does not belong to this Hotfix project.".into(),
+            ));
+        }
+    }
+
+    let existing_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        select count(*)
+        from hotfix_project_graph_nodes
+        where hotfix_project_id = $1 and is_system = false
+        "#,
+    )
+    .bind(project_id)
+    .fetch_one(&state.db)
+    .await? as usize;
+    let (position_x, position_y) =
+        default_system_project_graph_position(existing_count, existing_count.saturating_add(1));
+
+    let node_id = Uuid::new_v4();
+    let node_key = format!("project-item:{node_id}");
+
+    sqlx::query(
+        r#"
+        insert into hotfix_project_graph_nodes (
+            id,
+            hotfix_project_id,
+            imported_sentry_project_id,
+            linked_imported_sentry_project_id,
+            node_key,
+            node_type,
+            label,
+            description,
+            position_x,
+            position_y,
+            github_repo_id,
+            github_repo_full_name,
+            github_repo_url,
+            github_repo_default_branch,
+            base_directory,
+            indexing_status,
+            indexing_percentage,
+            metadata,
+            is_system
+        )
+        values (
+            $1, $2, $3, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'pending', 0, '{}'::jsonb, false
+        )
+        "#,
+    )
+    .bind(node_id)
+    .bind(project_id)
+    .bind(input.linked_imported_sentry_project_id)
+    .bind(&node_key)
+    .bind("project-item")
+    .bind(name)
+    .bind(description)
+    .bind(position_x)
+    .bind(position_y)
+    .bind(github_repo.id)
+    .bind(&github_repo.full_name)
+    .bind(&github_repo.html_url)
+    .bind(&github_repo.default_branch)
+    .bind(base_directory)
+    .execute(&state.db)
+    .await?;
 
     let payload = build_project_graph_payload(&state.db, project_id).await?;
     Ok(Json(payload))
@@ -2933,21 +3054,46 @@ async fn build_project_graph_payload(
     let node_rows = sqlx::query_as::<_, ProjectGraphNodeRow>(
         r#"
         select
-            id,
-            imported_sentry_project_id,
-            node_key,
-            node_type,
-            label,
-            description,
-            position_x,
-            position_y,
-            metadata,
-            is_system
+            hotfix_project_graph_nodes.id,
+            coalesce(
+                hotfix_project_graph_nodes.linked_imported_sentry_project_id,
+                hotfix_project_graph_nodes.imported_sentry_project_id
+            ) as imported_sentry_project_id,
+            hotfix_project_graph_nodes.node_key,
+            hotfix_project_graph_nodes.node_type,
+            hotfix_project_graph_nodes.label,
+            hotfix_project_graph_nodes.description,
+            hotfix_project_graph_nodes.position_x,
+            hotfix_project_graph_nodes.position_y,
+            hotfix_project_graph_nodes.github_repo_id,
+            hotfix_project_graph_nodes.github_repo_full_name,
+            hotfix_project_graph_nodes.github_repo_url,
+            hotfix_project_graph_nodes.github_repo_default_branch,
+            hotfix_project_graph_nodes.base_directory,
+            hotfix_project_graph_nodes.indexing_status,
+            hotfix_project_graph_nodes.indexing_percentage,
+            imported_sentry_projects.sentry_project_id as linked_sentry_project_id,
+            imported_sentry_projects.slug as linked_sentry_project_slug,
+            imported_sentry_projects.name as linked_sentry_project_name,
+            imported_sentry_projects.platform as linked_sentry_project_platform,
+            imported_sentry_projects.included as linked_sentry_project_included,
+            imported_sentry_projects.errors_24h as linked_sentry_errors_24h,
+            imported_sentry_projects.transactions_24h as linked_sentry_transactions_24h,
+            imported_sentry_projects.replays_24h as linked_sentry_replays_24h,
+            imported_sentry_projects.profiles_24h as linked_sentry_profiles_24h,
+            imported_sentry_projects.errors_24h_series as linked_sentry_errors_24h_series,
+            imported_sentry_projects.transactions_24h_series as linked_sentry_transactions_24h_series,
+            imported_sentry_projects.sentry_repo_connected as linked_sentry_repo_connected,
+            hotfix_project_graph_nodes.metadata,
+            hotfix_project_graph_nodes.is_system
         from hotfix_project_graph_nodes
-        where hotfix_project_id = $1
-        order by
-            case when node_type = 'sentry-org' then 0 else 1 end,
-            label asc
+        left join imported_sentry_projects
+            on imported_sentry_projects.id = coalesce(
+                hotfix_project_graph_nodes.linked_imported_sentry_project_id,
+                hotfix_project_graph_nodes.imported_sentry_project_id
+            )
+        where hotfix_project_graph_nodes.hotfix_project_id = $1
+        order by hotfix_project_graph_nodes.created_at asc, hotfix_project_graph_nodes.label asc
         "#,
     )
     .bind(project_id)
@@ -2979,17 +3125,76 @@ async fn build_project_graph_payload(
         project_slug,
         nodes: node_rows
             .into_iter()
-            .map(|row| ProjectGraphNodePayload {
-                id: row.id,
-                imported_sentry_project_id: row.imported_sentry_project_id,
-                node_key: row.node_key,
-                node_type: row.node_type,
-                label: row.label,
-                description: row.description,
-                position_x: row.position_x,
-                position_y: row.position_y,
-                metadata: row.metadata.0,
-                is_system: row.is_system,
+            .map(|row| {
+                let mut metadata = row.metadata.0;
+                if let Some(repo_id) = row.github_repo_id {
+                    metadata["githubRepoId"] = json!(repo_id);
+                }
+                if let Some(repo_full_name) = row.github_repo_full_name.clone() {
+                    metadata["githubRepoFullName"] = json!(repo_full_name);
+                    metadata["hotfixRepoConnected"] = json!(true);
+                } else {
+                    metadata["hotfixRepoConnected"] = json!(false);
+                }
+                if let Some(repo_url) = row.github_repo_url.clone() {
+                    metadata["githubRepoUrl"] = json!(repo_url);
+                }
+                if let Some(default_branch) = row.github_repo_default_branch.clone() {
+                    metadata["githubRepoDefaultBranch"] = json!(default_branch);
+                }
+                if let Some(base_directory) = row.base_directory.clone() {
+                    metadata["baseDirectory"] = json!(base_directory);
+                }
+                metadata["indexingStatus"] = json!(row.indexing_status);
+                metadata["indexingPercentage"] = json!(row.indexing_percentage);
+
+                if let Some(sentry_project_id) = row.linked_sentry_project_id.clone() {
+                    metadata["sentryProjectId"] = json!(sentry_project_id);
+                }
+                if let Some(sentry_slug) = row.linked_sentry_project_slug.clone() {
+                    metadata["slug"] = json!(sentry_slug);
+                    metadata["linkedSentryProjectSlug"] = json!(sentry_slug);
+                }
+                if let Some(sentry_name) = row.linked_sentry_project_name.clone() {
+                    metadata["linkedSentryProjectName"] = json!(sentry_name);
+                }
+                if let Some(platform) = row.linked_sentry_project_platform.clone() {
+                    metadata["platform"] = json!(platform.clone());
+                    metadata["linkedSentryProjectPlatform"] = json!(platform);
+                }
+                if let Some(included) = row.linked_sentry_project_included {
+                    metadata["included"] = json!(included);
+                }
+                metadata["errors24h"] = json!(row.linked_sentry_errors_24h.unwrap_or(0));
+                metadata["transactions24h"] =
+                    json!(row.linked_sentry_transactions_24h.unwrap_or(0));
+                metadata["replays24h"] = json!(row.linked_sentry_replays_24h.unwrap_or(0));
+                metadata["profiles24h"] = json!(row.linked_sentry_profiles_24h.unwrap_or(0));
+                metadata["errors24hSeries"] = json!(
+                    row.linked_sentry_errors_24h_series
+                        .map(|value| value.0)
+                        .unwrap_or_default()
+                );
+                metadata["transactions24hSeries"] = json!(
+                    row.linked_sentry_transactions_24h_series
+                        .map(|value| value.0)
+                        .unwrap_or_default()
+                );
+                metadata["sentryRepoConnected"] =
+                    json!(row.linked_sentry_repo_connected.unwrap_or(false));
+
+                ProjectGraphNodePayload {
+                    id: row.id,
+                    imported_sentry_project_id: row.imported_sentry_project_id,
+                    node_key: row.node_key,
+                    node_type: row.node_type,
+                    label: row.label,
+                    description: row.description,
+                    position_x: row.position_x,
+                    position_y: row.position_y,
+                    metadata,
+                    is_system: row.is_system,
+                }
             })
             .collect(),
         edges: edge_rows
@@ -4290,133 +4495,6 @@ async fn sync_hotfix_project_graph(
         ));
     }
 
-    let imported_projects = sqlx::query_as::<_, GraphImportedProjectRow>(
-        r#"
-            select
-                imported_sentry_projects.id,
-                imported_sentry_projects.sentry_project_id,
-                imported_sentry_projects.slug,
-                imported_sentry_projects.name,
-                imported_sentry_projects.platform,
-                imported_sentry_projects.included,
-                imported_sentry_projects.errors_24h,
-                imported_sentry_projects.transactions_24h,
-                imported_sentry_projects.replays_24h,
-                imported_sentry_projects.profiles_24h,
-                imported_sentry_projects.errors_24h_series,
-                imported_sentry_projects.transactions_24h_series,
-                imported_sentry_projects.sentry_repo_connected,
-                sentry_project_repo_mappings.github_repo_full_name,
-                sentry_project_repo_mappings.github_repo_url
-        from imported_sentry_projects
-        left join sentry_project_repo_mappings
-            on sentry_project_repo_mappings.imported_sentry_project_id = imported_sentry_projects.id
-        where imported_sentry_projects.hotfix_project_id = $1
-        order by imported_sentry_projects.included desc, imported_sentry_projects.name asc
-        "#,
-    )
-    .bind(hotfix_project_id)
-    .fetch_all(&mut **executor)
-    .await?;
-
-    let existing_positions = sqlx::query_as::<_, ExistingGraphNodePositionRow>(
-        r#"
-        select node_key, position_x, position_y
-        from hotfix_project_graph_nodes
-        where hotfix_project_id = $1 and is_system = true
-        "#,
-    )
-    .bind(hotfix_project_id)
-    .fetch_all(&mut **executor)
-    .await?
-    .into_iter()
-    .map(|row| (row.node_key, (row.position_x, row.position_y)))
-    .collect::<HashMap<_, _>>();
-    let has_legacy_org_node = existing_positions
-        .keys()
-        .any(|node_key| node_key.starts_with("sentry-org:"));
-
-    let mut seen_node_keys = Vec::new();
-
-    let imported_project_count = imported_projects.len();
-
-    for (index, imported_project) in imported_projects.iter().enumerate() {
-        let node_key = format!("sentry-project:{}", imported_project.sentry_project_id);
-        let (default_x, default_y) =
-            default_system_project_graph_position(index, imported_project_count);
-        let position = if has_legacy_org_node {
-            (default_x, default_y)
-        } else {
-            existing_positions
-                .get(&node_key)
-                .copied()
-                .unwrap_or((default_x, default_y))
-        };
-        let description = imported_project
-            .platform
-            .clone()
-            .or_else(|| Some(imported_project.slug.clone()));
-        let node_metadata = json!({
-            "provider": "sentry",
-            "sentryProjectId": imported_project.sentry_project_id,
-            "slug": imported_project.slug,
-            "platform": imported_project.platform,
-            "included": imported_project.included,
-            "errors24h": imported_project.errors_24h,
-            "transactions24h": imported_project.transactions_24h,
-            "replays24h": imported_project.replays_24h,
-            "profiles24h": imported_project.profiles_24h,
-            "errors24hSeries": imported_project.errors_24h_series.0,
-            "transactions24hSeries": imported_project.transactions_24h_series.0,
-            "sentryRepoConnected": imported_project.sentry_repo_connected,
-            "hotfixRepoConnected": imported_project.github_repo_full_name.is_some(),
-            "githubRepoFullName": imported_project.github_repo_full_name,
-            "githubRepoUrl": imported_project.github_repo_url
-        });
-
-        sqlx::query(
-            r#"
-            insert into hotfix_project_graph_nodes (
-                id,
-                hotfix_project_id,
-                imported_sentry_project_id,
-                node_key,
-                node_type,
-                label,
-                description,
-                position_x,
-                position_y,
-                metadata,
-                is_system
-            )
-            values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true)
-            on conflict (hotfix_project_id, node_key) do update
-            set
-                imported_sentry_project_id = excluded.imported_sentry_project_id,
-                node_type = excluded.node_type,
-                label = excluded.label,
-                description = excluded.description,
-                metadata = excluded.metadata,
-                is_system = excluded.is_system,
-                updated_at = now()
-            "#,
-        )
-        .bind(Uuid::new_v4())
-        .bind(hotfix_project_id)
-        .bind(imported_project.id)
-        .bind(&node_key)
-        .bind("sentry-project")
-        .bind(&imported_project.name)
-        .bind(description)
-        .bind(position.0)
-        .bind(position.1)
-        .bind(SqlJson(node_metadata))
-        .execute(&mut **executor)
-        .await?;
-
-        seen_node_keys.push(node_key);
-    }
-
     sqlx::query(
         r#"
         delete from hotfix_project_graph_edges
@@ -4427,30 +4505,15 @@ async fn sync_hotfix_project_graph(
     .execute(&mut **executor)
     .await?;
 
-    if seen_node_keys.is_empty() {
-        sqlx::query(
-            r#"
-            delete from hotfix_project_graph_nodes
-            where hotfix_project_id = $1 and is_system = true
-            "#,
-        )
-        .bind(hotfix_project_id)
-        .execute(&mut **executor)
-        .await?;
-    } else {
-        sqlx::query(
-            r#"
-            delete from hotfix_project_graph_nodes
-            where hotfix_project_id = $1
-              and is_system = true
-              and node_key <> all($2)
-            "#,
-        )
-        .bind(hotfix_project_id)
-        .bind(&seen_node_keys)
-        .execute(&mut **executor)
-        .await?;
-    }
+    sqlx::query(
+        r#"
+        delete from hotfix_project_graph_nodes
+        where hotfix_project_id = $1 and is_system = true
+        "#,
+    )
+    .bind(hotfix_project_id)
+    .execute(&mut **executor)
+    .await?;
 
     Ok(())
 }

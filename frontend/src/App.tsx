@@ -826,7 +826,6 @@ function ProjectsTab(props: {
   const [viewMode, setViewMode] = createSignal<ProjectsView>("list");
   const [createModalOpen, setCreateModalOpen] = createSignal(false);
   const [projectName, setProjectName] = createSignal("");
-  const [selectedConnectionId, setSelectedConnectionId] = createSignal("");
   const [selectedProjectId, setSelectedProjectId] = createSignal<string | null>(null);
   const [openedProjectId, setOpenedProjectId] = createSignal<string | null>(null);
   const [navigatingToProjectList, setNavigatingToProjectList] = createSignal(false);
@@ -838,9 +837,7 @@ function ProjectsTab(props: {
   const [dashboard, { refetch, mutate }] = createResource(() => "dashboard", async () => fetchDashboard());
 
   const sentryOrganizations = createMemo(() => dashboard()?.sentryOrganizations ?? []);
-  const canCreateProject = createMemo(
-    () => projectName().trim().length > 0 && selectedConnectionId().length > 0 && !creating(),
-  );
+  const canCreateProject = createMemo(() => projectName().trim().length > 0 && !creating());
   const sortedProjects = createMemo(() => {
     const projects = [...(dashboard()?.projects ?? [])];
 
@@ -866,7 +863,6 @@ function ProjectsTab(props: {
   const openCreateModal = () => {
     setProjectName("");
     setCreateError(null);
-    setSelectedConnectionId("");
     setCreateModalOpen(true);
   };
 
@@ -937,22 +933,6 @@ function ProjectsTab(props: {
 
     setSelectedProjectId(nextProject.id);
   };
-
-  createEffect(() => {
-    if (!createModalOpen()) {
-      return;
-    }
-
-    const organizations = sentryOrganizations();
-    if (!organizations.length) {
-      setSelectedConnectionId("");
-      return;
-    }
-
-    if (!organizations.some((organization) => organization.connectionId === selectedConnectionId())) {
-      setSelectedConnectionId("");
-    }
-  });
 
   createEffect(() => {
     const projects = sortedProjects();
@@ -1133,11 +1113,6 @@ function ProjectsTab(props: {
       return;
     }
 
-    if (!selectedConnectionId()) {
-      setCreateError("Select a Sentry organization before creating the project.");
-      return;
-    }
-
     setCreating(true);
     setCreateError(null);
 
@@ -1153,20 +1128,8 @@ function ProjectsTab(props: {
         }),
       });
 
-      await fetchJson<HotfixProject>(`/api/hotfix-projects/${project.id}/sentry-connection`, {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          connectionId: selectedConnectionId(),
-        }),
-      });
-
       setCreateModalOpen(false);
       setProjectName("");
-      setSelectedConnectionId("");
       setSelectedProjectId(project.id);
       resetToProjects();
       await refetch();
@@ -1307,6 +1270,35 @@ function ProjectsTab(props: {
     return updatedProject;
   };
 
+  const assignSentryConnection = async (projectId: string, connectionId: string) => {
+    const updatedProject = await fetchJson<HotfixProject>(
+      `/api/hotfix-projects/${projectId}/sentry-connection`,
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          connectionId,
+        }),
+      },
+    );
+
+    mutate((payload) =>
+      payload
+        ? {
+            ...payload,
+            projects: payload.projects.map((project) =>
+              project.id === updatedProject.id ? updatedProject : project,
+            ),
+          }
+        : payload,
+    );
+
+    return updatedProject;
+  };
+
   return (
     <div class="projects-shell">
       <Show
@@ -1338,7 +1330,9 @@ function ProjectsTab(props: {
               <ProjectWorkspace
                 activeSection={props.projectSection}
                 project={project()}
+                sentryOrganizations={sentryOrganizations()}
                 onBack={goToProjects}
+                onAssignSentryConnection={assignSentryConnection}
                 onRefreshSentryProjects={refreshSentryProjects}
                 onRename={renameProject}
                 onUpdateSentryProjectSelection={updateSentryProjectSelection}
@@ -1461,8 +1455,8 @@ function ProjectsTab(props: {
                   </div>
                   <p class="projects-empty-title">No projects yet</p>
                   <p class="projects-empty-copy">
-                    Create a project, connect a Sentry organization, and Hotfix will pull in its
-                    Sentry projects.
+                    Create a blank project, then add repo-backed items to the canvas and optionally
+                    attach specific Sentry projects later.
                   </p>
                 </div>
               }
@@ -1546,47 +1540,11 @@ function ProjectsTab(props: {
               </label>
 
               <label class="project-field">
-                <span class="project-field-label">Sentry organization</span>
-                <div
-                  class="projects-select-wrap"
-                  classList={{ "is-disabled": sentryOrganizations().length === 0 }}
-                >
-                  <select
-                    class="project-field-input project-field-select"
-                    value={selectedConnectionId()}
-                    onInput={(event) => setSelectedConnectionId(event.currentTarget.value)}
-                    disabled={sentryOrganizations().length === 0}
-                  >
-                    <option value="">Select a Sentry organization</option>
-                    <Show when={sentryOrganizations().length > 0}>
-                      <For each={sentryOrganizations()}>
-                        {(organization) => (
-                          <option value={organization.connectionId}>
-                            {organization.name}
-                          </option>
-                        )}
-                      </For>
-                    </Show>
-                  </select>
-                  <span class="projects-select-caret" aria-hidden="true">
-                    <svg viewBox="0 0 16 16" fill="none">
-                      <path d="m4.25 6.25 3.75 3.75 3.75-3.75" stroke="currentColor" stroke-width="1.15" />
-                    </svg>
-                  </span>
-                </div>
-                <Show when={sentryOrganizations().length > 0}>
-                  <p class="project-field-helper">
-                    Choose the Sentry organization Hotfix should import from.
-                  </p>
-                </Show>
-                <Show when={sentryOrganizations().length === 0}>
-                  <p class="project-field-helper">
-                    <a class="project-inline-link" href="/api/auth/sentry/start">
-                      Connect Sentry
-                    </a>{" "}
-                    to choose which organization to import.
-                  </p>
-                </Show>
+                <span class="project-field-label">Start blank</span>
+                <p class="project-field-helper">
+                  You can connect Sentry later from project settings and attach specific Sentry
+                  projects to canvas items as needed.
+                </p>
               </label>
 
               <Show when={createError()}>
@@ -1616,7 +1574,9 @@ function ProjectsTab(props: {
 function ProjectWorkspace(props: {
   activeSection: ProjectRouteSection;
   project: HotfixProject;
+  sentryOrganizations: SentryOrganizationSummary[];
   onBack: () => void;
+  onAssignSentryConnection: (projectId: string, connectionId: string) => Promise<HotfixProject>;
   onRefreshSentryProjects: (projectId: string) => Promise<HotfixProject>;
   onRename: (projectId: string, nextName: string) => Promise<void>;
   onUpdateSentryProjectSelection: (projectId: string, includedProjectIds: string[]) => Promise<void>;
@@ -1764,7 +1724,9 @@ function ProjectWorkspace(props: {
         <ProjectSectionContent
           activeSection={props.activeSection}
           project={props.project}
+          sentryOrganizations={props.sentryOrganizations}
           onHeaderLoadingChange={(active, label) => setHeaderLoadingState({ active, label })}
+          onAssignSentryConnection={props.onAssignSentryConnection}
           onRefreshSentryProjects={props.onRefreshSentryProjects}
           onUpdateSentryProjectSelection={props.onUpdateSentryProjectSelection}
         />
@@ -1776,7 +1738,9 @@ function ProjectWorkspace(props: {
 function ProjectSectionContent(props: {
   activeSection: ProjectRouteSection;
   project: HotfixProject;
+  sentryOrganizations: SentryOrganizationSummary[];
   onHeaderLoadingChange: (active: boolean, label: string) => void;
+  onAssignSentryConnection: (projectId: string, connectionId: string) => Promise<HotfixProject>;
   onRefreshSentryProjects: (projectId: string) => Promise<HotfixProject>;
   onUpdateSentryProjectSelection: (projectId: string, includedProjectIds: string[]) => Promise<void>;
 }) {
@@ -1823,7 +1787,9 @@ function ProjectSectionContent(props: {
       <Show when={props.activeSection === "settings"}>
         <ProjectSettingsSection
           project={props.project}
+          sentryOrganizations={props.sentryOrganizations}
           onHeaderLoadingChange={props.onHeaderLoadingChange}
+          onAssignSentryConnection={props.onAssignSentryConnection}
           onRefreshSentryProjects={props.onRefreshSentryProjects}
           onUpdateSentryProjectSelection={props.onUpdateSentryProjectSelection}
         />
@@ -1871,7 +1837,13 @@ function ProjectHomeSection(props: { project: HotfixProject }) {
     return `${props.project.sentryOrganization?.connectionId ?? "no-org"}:${sentrySignature}`;
   });
 
-  return <ProjectHomeGraph projectId={props.project.id} refreshKey={refreshKey()} />;
+  return (
+    <ProjectHomeGraph
+      projectId={props.project.id}
+      refreshKey={refreshKey()}
+      sentryProjects={props.project.sentryProjects}
+    />
+  );
 }
 
 function ProjectIncidentsSection(props: {
@@ -2045,7 +2017,9 @@ function ProjectIncidentsSection(props: {
 
 function ProjectSettingsSection(props: {
   project: HotfixProject;
+  sentryOrganizations: SentryOrganizationSummary[];
   onHeaderLoadingChange: (active: boolean, label: string) => void;
+  onAssignSentryConnection: (projectId: string, connectionId: string) => Promise<HotfixProject>;
   onRefreshSentryProjects: (projectId: string) => Promise<HotfixProject>;
   onUpdateSentryProjectSelection: (projectId: string, includedProjectIds: string[]) => Promise<void>;
 }) {
@@ -2054,6 +2028,10 @@ function ProjectSettingsSection(props: {
   );
   const [saving, setSaving] = createSignal(false);
   const [refreshing, setRefreshing] = createSignal(false);
+  const [assigningConnection, setAssigningConnection] = createSignal(false);
+  const [selectedConnectionId, setSelectedConnectionId] = createSignal(
+    props.project.sentryOrganization?.connectionId ?? "",
+  );
   const [saveError, setSaveError] = createSignal<string | null>(null);
   let autosaveTimeoutId: number | undefined;
 
@@ -2061,6 +2039,7 @@ function ProjectSettingsSection(props: {
     setDraftIncludedIds(
       props.project.sentryProjects.filter((project) => project.included).map((project) => project.id),
     );
+    setSelectedConnectionId(props.project.sentryOrganization?.connectionId ?? "");
     setSaveError(null);
   });
 
@@ -2166,6 +2145,27 @@ function ProjectSettingsSection(props: {
     }
   };
 
+  const connectSentryOrganization = async () => {
+    if (assigningConnection() || !selectedConnectionId()) {
+      return;
+    }
+
+    setAssigningConnection(true);
+    setSaveError(null);
+    props.onHeaderLoadingChange(true, "Connecting Sentry organization...");
+
+    try {
+      await props.onAssignSentryConnection(props.project.id, selectedConnectionId());
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not connect the selected Sentry organization.";
+      setSaveError(message);
+    } finally {
+      setAssigningConnection(false);
+      props.onHeaderLoadingChange(false, "");
+    }
+  };
+
   return (
     <div class="project-settings-shell">
       <div class="project-settings-header">
@@ -2173,7 +2173,8 @@ function ProjectSettingsSection(props: {
           <p class="logged-in-card-label">Settings</p>
           <h2 class="project-settings-title">Included Sentry projects</h2>
           <p class="project-settings-copy">
-            Select the imported Sentry projects that should be included in this Hotfix project.
+            Connect a Sentry organization for this project, then choose which imported Sentry
+            projects should be available to link onto canvas items.
           </p>
         </div>
 
@@ -2182,7 +2183,7 @@ function ProjectSettingsSection(props: {
             class="secondary-button"
             type="button"
             onClick={() => void refreshSelection()}
-            disabled={refreshing()}
+            disabled={refreshing() || !props.project.sentryOrganization}
           >
             {refreshing() ? "Refreshing..." : "Refresh from Sentry"}
           </button>
@@ -2192,6 +2193,60 @@ function ProjectSettingsSection(props: {
             </p>
           </Show>
         </div>
+      </div>
+
+      <div class="logged-in-card">
+        <p class="logged-in-card-label">Sentry organization</p>
+        <h3 class="logged-in-card-title">
+          {props.project.sentryOrganization?.name ?? "No Sentry organization connected"}
+        </h3>
+        <p class="logged-in-card-copy">
+          {props.project.sentryOrganization
+            ? "Switch the connected organization to refresh the list of importable Sentry projects."
+            : "Connect one Sentry organization to import its projects for this Hotfix project."}
+        </p>
+
+        <Show
+          when={props.sentryOrganizations.length > 0}
+          fallback={
+            <p class="project-field-helper">
+              <a class="project-inline-link" href="/api/auth/sentry/start">
+                Connect Sentry
+              </a>{" "}
+              to make organizations available here.
+            </p>
+          }
+        >
+          <div class="project-settings-connect-row">
+            <div class="projects-select-wrap">
+              <select
+                class="project-field-input project-field-select"
+                value={selectedConnectionId()}
+                onInput={(event) => setSelectedConnectionId(event.currentTarget.value)}
+              >
+                <option value="">Select a Sentry organization</option>
+                <For each={props.sentryOrganizations}>
+                  {(organization) => (
+                    <option value={organization.connectionId}>{organization.name}</option>
+                  )}
+                </For>
+              </select>
+              <span class="projects-select-caret" aria-hidden="true">
+                <svg viewBox="0 0 16 16" fill="none">
+                  <path d="m4.25 6.25 3.75 3.75 3.75-3.75" stroke="currentColor" stroke-width="1.15" />
+                </svg>
+              </span>
+            </div>
+            <button
+              class="secondary-button"
+              type="button"
+              onClick={() => void connectSentryOrganization()}
+              disabled={!selectedConnectionId() || assigningConnection()}
+            >
+              {assigningConnection() ? "Connecting..." : props.project.sentryOrganization ? "Switch org" : "Connect org"}
+            </button>
+          </div>
+        </Show>
       </div>
 
       <Show

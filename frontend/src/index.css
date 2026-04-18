@@ -1329,6 +1329,15 @@ button {
   color: rgba(242, 238, 227, 0.74);
 }
 
+.project-home-actions {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 4;
+  display: inline-flex;
+  pointer-events: auto;
+}
+
 .project-home-controls {
   position: absolute;
   left: 1rem;
@@ -1678,6 +1687,10 @@ button {
   color: rgba(242, 238, 227, 0.5);
 }
 
+.project-graph-node-card-status.is-pending {
+  color: rgba(127, 220, 255, 0.72);
+}
+
 .project-graph-node-card-status::before {
   content: "";
   width: 0.42rem;
@@ -1736,6 +1749,14 @@ button {
 .project-graph-node-card-badge.is-disconnected {
   background: rgba(255, 255, 255, 0.04);
   color: rgba(242, 238, 227, 0.34);
+}
+
+.project-settings-connect-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  margin-top: 0.85rem;
 }
 
 .project-graph-node-mini-chart {
@@ -2857,6 +2878,10 @@ button {
 
 @media (max-width: 760px) {
   .project-home-shell.has-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .project-settings-connect-row {
     grid-template-columns: 1fr;
   }
 
