@@ -1641,6 +1641,9 @@ function ProjectsTab(props: {
                     <div class="projects-table-wrap">
                       <div class="projects-table">
                         <div class="projects-table-header" role="row">
+                          <div class="projects-table-header-label projects-table-header-label--index">
+                            #
+                          </div>
                           <button
                             class="projects-table-header-button"
                             classList={{ "is-active": sortBy() === "alphabetical" }}
@@ -1688,7 +1691,7 @@ function ProjectsTab(props: {
 
                         <div class="projects-collection is-table">
                           <For each={sortedProjects()}>
-                            {(project) => (
+                            {(project, index) => (
                               <article
                                 class="project-card is-table-row"
                                 classList={{
@@ -1703,6 +1706,10 @@ function ProjectsTab(props: {
                                   onFocus={() => setSelectedProjectId(project.id)}
                                   onClick={() => openProject(project.id)}
                                 >
+                                  <div class="project-card-cell project-card-cell--index">
+                                    <p class="project-card-meta">{index() + 1}</p>
+                                  </div>
+
                                   <div class="project-card-cell project-card-cell--name">
                                     <div class="project-card-title-row">
                                       <h2 class="project-card-title">{project.name}</h2>
@@ -2142,6 +2149,7 @@ function ProjectsHomeSkeleton(props: { viewMode: ProjectsView }) {
           <div class="projects-table-wrap is-skeleton">
             <div class="projects-table">
               <div class="projects-table-header is-skeleton" role="row">
+                <div class="projects-table-header-label projects-table-header-label--index">#</div>
                 <div class="projects-table-header-label">Name</div>
                 <div class="projects-table-header-label">Health</div>
                 <div class="projects-table-header-label">Indexing</div>
@@ -2157,6 +2165,9 @@ function ProjectsHomeSkeleton(props: { viewMode: ProjectsView }) {
                   {() => (
                     <article class="project-card is-table-row is-skeleton">
                       <div class="project-card-main">
+                        <div class="project-card-cell project-card-cell--index">
+                          <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--tiny" />
+                        </div>
                         <div class="project-card-cell project-card-cell--name">
                           <div class="project-card-title-row">
                             <div class="projects-skeleton-block projects-skeleton-text projects-skeleton-text--name" />

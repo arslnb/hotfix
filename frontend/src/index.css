@@ -444,7 +444,7 @@ button {
   justify-content: center;
   gap: 0.16rem;
   width: 2rem;
-  height: 2rem;
+  height: 28px;
   border: none;
   border-radius: 4px;
   background: transparent;
@@ -581,7 +581,7 @@ button {
   border-radius: 4px;
   background: var(--brand-blue);
   color: #04111b;
-  font-size: 0.86rem;
+  font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
   transition:
@@ -652,8 +652,8 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   border: 1px solid rgba(127, 220, 255, 0.24);
   border-radius: 4px;
@@ -884,8 +884,8 @@ button {
 .projects-table {
   display: flex;
   flex-direction: column;
-  min-width: 66rem;
-  --projects-table-columns: minmax(16rem, 1.85fr) 7.4rem 8.3rem 5.7rem 9rem 7.8rem 6.8rem 2.7rem;
+  min-width: 67rem;
+  --projects-table-columns: 2.2rem minmax(15rem, 1.85fr) 7.4rem 8.3rem 5.7rem 9rem 7.8rem 7.2rem 2.7rem;
 }
 
 .projects-table-header {
@@ -953,6 +953,11 @@ button {
   align-items: center;
   padding: 5px 0.7rem;
   justify-content: flex-start;
+}
+
+.projects-table-header-label--index {
+  justify-content: center;
+  padding-inline: 0;
 }
 
 .projects-table-header-spacer {
@@ -1041,8 +1046,8 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.7rem;
-  height: 1.7rem;
+  width: 28px;
+  height: 28px;
   border: none;
   border-radius: 4px;
   background: transparent;
@@ -1066,8 +1071,8 @@ button {
 
 .projects-view-icon {
   display: inline-grid;
-  width: 0.92rem;
-  height: 0.92rem;
+  width: 0.82rem;
+  height: 0.82rem;
   place-items: center;
 }
 
@@ -1163,9 +1168,9 @@ button {
 }
 
 .project-card.is-table-row .project-card-main {
-  grid-column: 1 / 8;
+  grid-column: 1 / 9;
   display: grid;
-  grid-template-columns: minmax(16rem, 1.85fr) 7.4rem 8.3rem 5.7rem 9rem 7.8rem 6.8rem;
+  grid-template-columns: 2.2rem minmax(15rem, 1.85fr) 7.4rem 8.3rem 5.7rem 9rem 7.8rem 7.2rem;
   align-items: stretch;
   gap: 0;
   height: 32px;
@@ -1213,6 +1218,11 @@ button {
   align-items: center;
   align-self: stretch;
   padding: 0 0.7rem;
+}
+
+.project-card-cell--index {
+  justify-content: center;
+  padding-inline: 0;
 }
 
 .project-card-title-row {
@@ -1373,7 +1383,7 @@ button {
   position: relative;
   top: auto;
   right: auto;
-  grid-column: 8;
+  grid-column: 9;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1501,8 +1511,8 @@ button {
 }
 
 .project-card-stats.is-inline .project-sparkline {
-  width: 2.45rem;
-  height: 0.54rem;
+  width: 3.6rem;
+  height: 0.76rem;
 }
 
 .project-card.is-grid .project-sparkline {
@@ -2954,12 +2964,12 @@ button {
 
 .projects-skeleton-button--new {
   width: 9.65rem;
-  height: 2.5rem;
+  height: 28px;
 }
 
 .projects-skeleton-button--avatar {
-  width: 2rem;
-  height: 2rem;
+  width: 28px;
+  height: 28px;
 }
 
 .projects-view-toggle.is-skeleton {
