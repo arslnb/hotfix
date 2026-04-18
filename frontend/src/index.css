@@ -874,8 +874,8 @@ button {
   border-bottom: 1px solid rgb(121, 188, 210);
   background-image: repeating-linear-gradient(
     -45deg,
-    rgb(121 188 210 / 70%) 0 1px,
-    transparent 1px 2.4px
+    rgb(121 188 210 / 42%) 0 1px,
+    transparent 1px 3.4px
   );
   pointer-events: none;
   z-index: 8;
