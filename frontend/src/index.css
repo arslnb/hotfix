@@ -812,11 +812,11 @@ button {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
+  gap: 1px;
   color: rgba(127, 220, 255, 0.34);
   font-family: "Geist Mono", ui-monospace, "SFMono-Regular", "SF Mono", monospace;
   font-weight: 500;
-  line-height: 1;
+  line-height: 0.82;
   text-shadow: 0 0 10px rgba(127, 220, 255, 0.08);
 }
 
@@ -1063,10 +1063,6 @@ button {
 .project-card.is-selected {
   background: #060708;
   border-color: rgba(127, 220, 255, 0.45);
-}
-
-.project-card:active {
-  transform: translateY(1px);
 }
 
 .project-card-main:focus-visible {
