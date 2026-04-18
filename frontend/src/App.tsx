@@ -1511,6 +1511,7 @@ function ProjectsTab(props: {
           </Show>
           <Show when={!openedProject()}>
             <div class="projects-home-surface">
+              <div class="projects-guide-frame">
               <div class="projects-header-block">
                 <div class="projects-header">
                   <div class="projects-header-copy">
@@ -2002,6 +2003,7 @@ function ProjectsTab(props: {
                   </div>
                 </Show>
               </Show>
+              </div>
             </div>
           </Show>
         </Show>
@@ -2224,6 +2226,7 @@ function ProjectsHomeSkeleton(props: { viewMode: ProjectsView }) {
 
   return (
     <div class="projects-home-surface is-skeleton" aria-hidden="true">
+      <div class="projects-guide-frame">
       <div class="projects-header-block">
         <div class="projects-header">
           <div class="projects-header-copy">
@@ -2360,6 +2363,7 @@ function ProjectsHomeSkeleton(props: { viewMode: ProjectsView }) {
           </div>
         </div>
       </Show>
+      </div>
     </div>
   );
 }
