@@ -861,7 +861,7 @@ button {
   display: flex;
   flex-direction: column;
   gap: 0.58rem;
-  padding: 100px var(--projects-home-inset) 30px;
+  padding: 70px var(--projects-home-inset) 30px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -871,8 +871,8 @@ button {
   left: 0;
   right: 0;
   height: 30px;
-  border-top: 1px solid rgba(127, 220, 255, 0.92);
-  border-bottom: 1px solid rgba(127, 220, 255, 0.92);
+  border-top: 1px solid rgba(127, 220, 255, 0.46);
+  border-bottom: 1px solid rgba(127, 220, 255, 0.46);
   pointer-events: none;
   z-index: 8;
 }
